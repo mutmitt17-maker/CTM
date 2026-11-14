@@ -1,0 +1,9 @@
+{
+  "name": "credit-telephone",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plateforme de vente à crédit de téléphones (USD). Base de données et Edge Functions sur Supabase, back-office sur Cloudflare Pages.",
+  "scripts": {
+    "check:functions": "deno check supabase/functions/*/index.ts"
+  }
+}

@@ -1,0 +1,15 @@
+project_id = "credit-telephone"
+
+[functions.api]
+verify_jwt = true
+
+# Called by the mobile money operator or aggregator: no Supabase JWT, we check an HMAC signature ourselves.
+[functions.webhook-mobile-money]
+verify_jwt = false
+
+# Called by the scheduler: no Supabase JWT, we check a shared secret ourselves.
+[functions.worker-notifications]
+verify_jwt = false
+
+[functions.worker-device-commands]
+verify_jwt = false
