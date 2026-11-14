@@ -23,7 +23,7 @@ jobs:
           version: latest
       - name: Deploy
         run: |
-          supabase functions deploy api --project-ref "$PROJECT_REF"
-          supabase functions deploy webhook-mobile-money --no-verify-jwt --project-ref "$PROJECT_REF"
-          supabase functions deploy worker-notifications --no-verify-jwt --project-ref "$PROJECT_REF"
-          supabase functions deploy worker-device-commands --no-verify-jwt --project-ref "$PROJECT_REF"
+          supabase functions deploy api --yes --project-ref "$PROJECT_REF"
+          supabase functions deploy webhook-mobile-money --no-verify-jwt --yes --project-ref "$PROJECT_REF"
+          supabase functions deploy worker-notifications --no-verify-jwt --yes --project-ref "$PROJECT_REF"
+          supabase functions deploy worker-device-commands --no-verify-jwt --yes --project-ref "$PROJECT_REF"
