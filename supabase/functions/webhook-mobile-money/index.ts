@@ -7,7 +7,7 @@ import { serviceClient } from "../_shared/clients.ts";
 
 const encoder = new TextEncoder();
 
-function hexToBytes(hex: string): Uint8Array {
+function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
   const clean = hex.trim().toLowerCase();
   if (!/^[0-9a-f]+$/.test(clean) || clean.length % 2 !== 0) return new Uint8Array();
   const out = new Uint8Array(clean.length / 2);

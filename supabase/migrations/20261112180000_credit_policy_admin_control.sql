@@ -19,6 +19,58 @@ Plain English: puts the pilot values (fees, interest, penalties, lock delay, sco
 - Existing contracts are not affected: each contract keeps a frozen copy of its terms. Changes apply to new applications only.
 */
 
+-- 0. Audit trigger: tolerate tables whose id is not a uuid (credit_policy.id is boolean)
+CREATE OR REPLACE FUNCTION public.audit_row_change()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  hdrs json;
+  actor uuid;
+  actor_r public.app_role;
+  ip inet;
+  fp text;
+  rec_txt text;
+  rec_id uuid;
+BEGIN
+  BEGIN
+    hdrs := nullif(current_setting('request.headers', true), '')::json;
+  EXCEPTION WHEN others THEN
+    hdrs := NULL;
+  END;
+
+  BEGIN
+    ip := nullif(coalesce(
+      nullif(current_setting('app.client_ip', true), ''),
+      split_part(coalesce(hdrs ->> 'x-forwarded-for', ''), ',', 1)
+    ), '')::inet;
+  EXCEPTION WHEN others THEN
+    ip := NULL;
+  END;
+
+  fp := coalesce(nullif(current_setting('app.device_fingerprint', true), ''), hdrs ->> 'x-device-fingerprint');
+  actor := public.current_actor_id();
+  SELECT u.role INTO actor_r FROM public.app_user AS u WHERE u.id = actor;
+
+  rec_txt := (CASE WHEN TG_OP = 'DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END ->> 'id');
+  IF rec_txt ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+    rec_id := rec_txt::uuid;
+  ELSE
+    rec_id := NULL; -- non-uuid key (e.g. singleton credit_policy); full row is in state_before/after
+  END IF;
+
+  INSERT INTO public.audit_log (actor_id, actor_role, ip_address, device_fingerprint, action, table_name, record_id, state_before, state_after)
+  VALUES (
+    actor, actor_r, ip, left(fp, 128), TG_OP, TG_TABLE_NAME, rec_id,
+    CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN to_jsonb(OLD) END,
+    CASE WHEN TG_OP IN ('INSERT', 'UPDATE') THEN to_jsonb(NEW) END
+  );
+  RETURN NULL;
+END;
+$$;
+
 -- 1. Starting values (only if still at the initial zero values)
 UPDATE credit_policy
 SET processing_fee_rate = 0.03,
