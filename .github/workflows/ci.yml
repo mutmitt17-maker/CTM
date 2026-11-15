@@ -34,6 +34,8 @@ jobs:
           done
       - name: Scenario test (onboarding to ownership transfer)
         run: psql -v ON_ERROR_STOP=1 -f supabase/ci/smoke_test.sql
+      - name: Biometric work queue test
+        run: psql -v ON_ERROR_STOP=1 -f supabase/ci/biometric_test.sql
 
   functions:
     name: Type-check Edge Functions

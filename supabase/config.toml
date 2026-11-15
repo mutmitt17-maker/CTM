@@ -13,3 +13,7 @@ verify_jwt = false
 
 [functions.worker-device-commands]
 verify_jwt = false
+
+# Called by the scheduler: no Supabase JWT, we check a shared secret ourselves.
+[functions.worker-biometrics]
+verify_jwt = false

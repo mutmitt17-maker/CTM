@@ -4,8 +4,12 @@ Chaque point est codé côté Android derrière une interface avec une implémen
 Les routes et formats ci-dessous sont des **propositions** à valider avant d'écrire le serveur.
 
 ## 1. Stockage des photos
-- Supabase Storage, bucket privé `kyc` (pièces, selfies) et `handover` (preuves de remise), règles d'accès par agence.
-- Chemin proposé : `kyc/{customer_id}/{uuid}.jpg`. L'application envoie le fichier puis met le chemin dans l'action (`id_document_photo_path`, `selfie_path`, `p_photo_path`).
+- **Fait côté serveur (étape 7)** : deux buckets privés `kyc` et `handover`, 5 Mo maximum, JPEG ou PNG. L'agent peut seulement **ajouter** un fichier ; il ne peut ni le relire, ni le remplacer, ni le supprimer.
+- Chemin dans le bucket (sans le nom du bucket) :
+  - `kyc` : `<customer_id>/<nom>.jpg`, pour un client de l'agence de l'agent ;
+  - `handover` : `<delivery_id>/<nom>.jpg`, pour une livraison de l'agent.
+- **Ordre à respecter** : le client (et la livraison) doit exister sur le serveur avant l'envoi de la photo. Envoyer la photo seulement après que `customer.create` est `applied`, sinon l'envoi est refusé.
+- Le chemin envoyé dans l'action est celui **dans le bucket** (`id_document_photo_path`, `selfie_path`, `p_photo_path`), par exemple `3f2a…/selfie-1.jpg`.
 - Les fichiers sont supprimés du téléphone dès l'envoi confirmé.
 
 ## 2. Connexion du client par OTP
@@ -28,7 +32,8 @@ Les routes et formats ci-dessous sont des **propositions** à valider avant d'é
 
 ## 7. Vérification biométrique côté serveur
 - Le moteur de décision ignore la vivacité et la correspondance envoyées par le téléphone. Il attend `record_biometric_verification()`, aujourd'hui réservé au serveur et non exposé, et qui dépend du point 1.
-- Conséquence : tout `application.submit` répond `awaiting_biometric_verification` et aucun dossier ne devient `approved` en production. Les tests de bout en bout doivent simuler cette étape.
+- **Fait côté serveur (étape 7)** : le worker `worker-biometrics` récupère les photos, appelle le fournisseur de visages, puis enregistre le résultat ; les dossiers en attente sont alors évalués automatiquement.
+- **Reste à faire** : l'adaptateur du vrai fournisseur (`_shared/biometrics.ts`, mode `live`). En attendant, le mode `simulate_pass` permet de tester le parcours complet sur un projet de test seulement. En mode `dry-run` (par défaut), aucun dossier ne sort de l'attente.
 
 ## 8. Codes d'erreur stables
 - Hors `sync_batch`, `error` est un message anglais libre. Messages rencontrés dans le code :
