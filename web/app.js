@@ -224,6 +224,7 @@ async function start() {
   $("#login").hidden = !!session;
   $("#app").hidden = !session;
   $("#logout").hidden = !session;
+  document.body.classList.toggle("logged", !!session);
   if (!session) { $("#who").textContent = ""; return; }
 
   try { me = await api("me"); } catch (e) { me = null; }
