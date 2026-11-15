@@ -60,6 +60,79 @@ function message(kind, text) {
   return h("p", { class: kind }, text);
 }
 
+// ---------------------------------------------------------------- credit policy form
+// kind: "pct" = stored as a fraction (0.06) but shown/typed as a percent (6)
+//       "num" = number as is, "int" = whole number, "list" = list of whole numbers
+const POLICY_GROUPS = [
+  { title: "1. Coûts pour le client", fields: [
+    { key: "processing_fee_rate", kind: "pct", max: 50, label: "Frais de dossier", unit: "% du prix", help: "Payés une seule fois, à l'ouverture du crédit." },
+    { key: "interest_rate_per_30_days", kind: "pct", max: 100, label: "Intérêt", unit: "% par 30 jours", help: "Le coût du crédit, calculé par tranche de 30 jours." },
+    { key: "penalty_rate_per_day", kind: "pct", max: 10, label: "Pénalité de retard", unit: "% par jour", help: "Ajoutée chaque jour de retard, après les jours de grâce." },
+    { key: "penalty_cap_rate", kind: "pct", max: 100, label: "Plafond des pénalités", unit: "% de l'échéance", help: "Les pénalités ne dépassent jamais cette part de l'échéance en retard." },
+  ] },
+  { title: "2. Retards", fields: [
+    { key: "grace_days", kind: "int", label: "Jours de grâce", unit: "jours", help: "Délai de tolérance avant que les pénalités commencent." },
+    { key: "lock_after_days_overdue", kind: "int", label: "Blocage du téléphone après", unit: "jours de retard", help: "Au-delà, le téléphone est verrouillé." },
+  ] },
+  { title: "3. Acceptation", fields: [
+    { key: "auto_approve_min_score", kind: "int", max: 100, label: "Acceptation automatique à partir du score", unit: "sur 100", help: "À partir de ce score, le dossier est accepté sans vérification." },
+    { key: "review_min_score", kind: "int", max: 100, label: "Vérification humaine à partir du score", unit: "sur 100", help: "Entre ce score et le précédent, une personne décide. En dessous, refusé." },
+    { key: "down_payment_min_pct", kind: "num", max: 100, label: "Acompte minimum", unit: "% du prix", help: "Le client doit payer au moins cette part au départ." },
+    { key: "down_payment_max_pct", kind: "num", max: 100, label: "Acompte maximum", unit: "% du prix", help: "Part maximale acceptée au départ." },
+    { key: "allowed_durations", kind: "list", label: "Durées autorisées", unit: "jours, séparées par des virgules", help: "Exemple : 30, 60, 90, 120, 180", wide: true },
+  ] },
+  { title: "4. Sécurité", fields: [
+    { key: "face_match_min", kind: "pct", max: 100, label: "Reconnaissance du visage minimum", unit: "%", help: "Le visage du client doit ressembler à sa pièce d'identité à ce niveau au moins." },
+    { key: "ocr_confidence_min", kind: "pct", max: 100, label: "Lecture de la pièce d'identité minimum", unit: "%", help: "Niveau de certitude requis pour lire automatiquement la pièce." },
+  ] },
+  { title: "Avancé (rarement modifié)", advanced: true, fields: [
+    { key: "burden_good", kind: "pct", max: 100, label: "Charge sur le revenu : bonne", unit: "% du revenu", help: "Mensualité jusqu'à cette part du revenu : meilleure note." },
+    { key: "burden_ok", kind: "pct", max: 100, label: "Charge sur le revenu : acceptable", unit: "% du revenu", help: "Note moyenne jusqu'à cette part." },
+    { key: "burden_max", kind: "pct", max: 100, label: "Charge sur le revenu : maximale", unit: "% du revenu", help: "Au-delà, la note de charge est nulle." },
+  ] },
+];
+
+const POLICY_ERRORS = [
+  ["credit_policy_interest_ceiling", "L'intérêt ne peut pas dépasser 100 % par 30 jours."],
+  ["credit_policy_fee_ceiling", "Les frais de dossier ne peuvent pas dépasser 50 %."],
+  ["credit_policy_penalty_ceiling", "La pénalité ne peut pas dépasser 10 % par jour."],
+  ["credit_policy_down_range", "L'acompte minimum ne peut pas dépasser l'acompte maximum."],
+  ["credit_policy_score_order", "Le score de vérification humaine ne peut pas dépasser le score d'acceptation automatique."],
+  ["credit_policy_burden_order", "Les charges sur le revenu doivent aller de la plus petite (bonne) à la plus grande (maximale)."],
+];
+
+function friendlyPolicyError(msg) {
+  for (const [key, text] of POLICY_ERRORS) if (msg.includes(key)) return text;
+  if (/only the system administrator/i.test(msg)) return "Seul l'administrateur système peut modifier la politique.";
+  if (/violates check constraint/i.test(msg)) return "Une valeur est hors des limites autorisées. Vérifiez les chiffres saisis.";
+  return msg;
+}
+
+const round = (n, d = 6) => Number(n.toFixed(d));
+function policyToInput(f, v) {
+  if (f.kind === "list") return (v ?? []).join(", ");
+  if (v === null || v === undefined) return "";
+  return String(f.kind === "pct" ? round(v * 100, 4) : v);
+}
+// Returns the value to store, or throws a readable error.
+function policyFromInput(f, text) {
+  const raw = text.trim();
+  if (f.kind === "list") {
+    const nums = raw.split(/[\s,;]+/).filter(Boolean).map(Number);
+    if (!nums.length || nums.some((n) => !Number.isInteger(n) || n <= 0)) throw new Error(`« ${f.label} » : saisissez des nombres entiers positifs séparés par des virgules.`);
+    return [...new Set(nums)].sort((a, b) => a - b);
+  }
+  if (raw === "") throw new Error(`« ${f.label} » : champ vide.`);
+  const n = Number(raw.replace(",", "."));
+  if (!Number.isFinite(n) || n < 0) throw new Error(`« ${f.label} » : saisissez un nombre positif.`);
+  if (f.kind === "int" && !Number.isInteger(n)) throw new Error(`« ${f.label} » : saisissez un nombre entier.`);
+  if (f.max !== undefined && n > f.max) throw new Error(`« ${f.label} » : ${f.max} au maximum.`);
+  return f.kind === "pct" ? round(n / 100) : n;
+}
+function sameValue(f, a, b) {
+  return f.kind === "list" ? JSON.stringify(a) === JSON.stringify(b) : Number(a) === Number(b);
+}
+
 // ---------------------------------------------------------------- views
 const views = {
   async home(me) {
@@ -102,33 +175,61 @@ const views = {
       h("p", {}, "Réservé aux agents de terrain de l'agence (règle de l'étape 2)."), form, out);
   },
 
-  async policy(me) {
+  async policy(me, notice) {
     const { data, error } = await sb.from("credit_policy").select("*").maybeSingle();
     if (error) return message("error", error.message);
-    const box = h("div", { class: "card" }, h("h2", {}, "Politique de crédit"), h("pre", {}, JSON.stringify(data, null, 2)));
+    if (!data) return message("error", "Aucune politique de crédit trouvée.");
+    const canEdit = me.role === "system_admin";
 
-    if (me.role === "system_admin") {
-      const out = h("div");
-      const form = h("form", {
-        onsubmit: async (e) => {
-          e.preventDefault();
-          out.replaceChildren();
-          try {
-            const f = new FormData(form);
-            const res = await api("update_credit_policy", {
-              p_changes: JSON.parse(f.get("changes")),
-              p_reason: f.get("reason"),
-            });
-            out.append(message("ok", "Politique mise à jour."), h("pre", {}, JSON.stringify(res, null, 2)));
-          } catch (err) { out.append(message("error", err.message)); }
-        },
+    const inputs = {};
+    const renderField = (f) => {
+      const input = h("input", {
+        name: f.key, type: f.kind === "list" ? "text" : "number", step: "any", min: "0",
+        value: policyToInput(f, data[f.key]), ...(canEdit ? {} : { disabled: "" }),
+      });
+      if (f.kind === "list") input.removeAttribute("min");
+      inputs[f.key] = input;
+      return h("label", { class: "pfield" },
+        h("strong", {}, f.label),
+        h("span", { class: "help" }, f.help),
+        h("span", { class: `row${f.wide ? " wide" : ""}` }, input, h("span", { class: "unit" }, f.unit)));
+    };
+    const groups = POLICY_GROUPS.map((g) => g.advanced
+      ? h("details", { class: "advanced" }, h("summary", {}, g.title), g.fields.map(renderField))
+      : h("div", { class: "pgroup" }, h("h3", {}, g.title), g.fields.map(renderField)));
+
+    const out = h("div");
+    if (notice) out.append(message("ok", notice));
+
+    const box = h("div", { class: "card" }, h("h2", {}, "Politique de crédit"),
+      h("p", {}, canEdit
+        ? "Les règles appliquées à tous les nouveaux dossiers. Les contrats déjà signés ne changent pas."
+        : "Les règles appliquées à tous les nouveaux dossiers (lecture seule : seul l'administrateur système peut les modifier)."));
+
+    if (!canEdit) { box.append(...groups); return box; }
+
+    const reason = h("input", { name: "reason", required: "", placeholder: "Ex. : ajustement de l'intérêt" });
+    const form = h("form", {
+      onsubmit: async (e) => {
+        e.preventDefault();
+        out.replaceChildren();
+        try {
+          const changes = {};
+          for (const g of POLICY_GROUPS) for (const f of g.fields) {
+            const value = policyFromInput(f, inputs[f.key].value);
+            if (!sameValue(f, value, data[f.key])) changes[f.key] = value;
+          }
+          if (Object.keys(changes).length === 0) { out.append(message("error", "Aucun changement à enregistrer.")); return; }
+          await api("update_credit_policy", { p_changes: changes, p_reason: reason.value.trim() });
+          show(await views.policy(me, "Politique mise à jour."));
+        } catch (err) { out.append(message("error", friendlyPolicyError(err.message))); }
       },
-        h("label", {}, 'Changements (JSON, ex : {"interest_rate_per_30_days": 0.05})', h("textarea", { name: "changes", rows: "3", required: "" })),
-        h("label", {}, "Motif", h("input", { name: "reason", required: "" })),
-        h("button", { type: "submit" }, "Enregistrer"),
-      );
-      box.append(h("h3", {}, "Modifier (super-admin)"), form, out);
-    }
+    },
+      ...groups,
+      h("label", {}, h("strong", {}, "Motif du changement"), reason),
+      h("button", { type: "submit" }, "Enregistrer"),
+    );
+    box.append(form, out);
     return box;
   },
 
