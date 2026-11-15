@@ -5,6 +5,12 @@ const sb = createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
 
 const $ = (s) => document.querySelector(s);
 
+// Opened from a password-reset e-mail link: show the "new password" form instead of the app.
+let recovering = /type=recovery/.test(location.hash + location.search);
+sb.auth.onAuthStateChange((event) => {
+  if (event === "PASSWORD_RECOVERY") { recovering = true; start(); }
+});
+
 // Small DOM helper: text is always inserted as text, never as HTML.
 function h(tag, attrs = {}, ...kids) {
   const el = document.createElement(tag);
@@ -221,6 +227,12 @@ async function open(name) {
 
 async function start() {
   const { data: { session } } = await sb.auth.getSession();
+  if (recovering && session) {
+    $("#login").hidden = true; $("#app").hidden = true; $("#reset").hidden = false;
+    $("#logout").hidden = true;
+    return;
+  }
+  $("#reset").hidden = true;
   $("#login").hidden = !!session;
   $("#app").hidden = !session;
   $("#logout").hidden = !session;
@@ -243,6 +255,29 @@ $("#login-form").addEventListener("submit", async (e) => {
   $("#login-error").textContent = "";
   const { error } = await sb.auth.signInWithPassword({ email: $("#email").value, password: $("#password").value });
   if (error) { $("#login-error").textContent = error.message; return; }
+  start();
+});
+
+$("#forgot").addEventListener("click", async (e) => {
+  e.preventDefault();
+  const err = $("#login-error");
+  err.className = "error"; err.textContent = "";
+  const email = $("#email").value.trim();
+  if (!email) { err.textContent = "Saisissez d'abord votre e-mail ci-dessus."; return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + "/" });
+  if (error) { err.textContent = error.message; return; }
+  err.className = "ok";
+  err.textContent = "Si ce compte existe, un e-mail de réinitialisation vient d'être envoyé.";
+});
+
+$("#reset-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("#reset-error").textContent = "";
+  const { error } = await sb.auth.updateUser({ password: $("#new-password").value });
+  if (error) { $("#reset-error").textContent = error.message; return; }
+  recovering = false;
+  history.replaceState(null, "", location.pathname);
+  $("#new-password").value = "";
   start();
 });
 
