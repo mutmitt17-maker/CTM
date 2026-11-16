@@ -15,5 +15,6 @@ dependencyResolutionManagement {
     }
 }
 
-// Jalon 1. Les autres modules (:core-security, :core-network, :app-agent, :app-client) seront ajoutés aux jalons suivants.
+// Jalons 1 et 2. Les autres modules (:core-security, :app-agent, :app-client) seront ajoutés aux jalons suivants.
 include(":core-model")
+include(":core-network")
