@@ -13,8 +13,14 @@ jobs:
       PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
     steps:
       - uses: actions/checkout@v4
+      - name: Check secrets
+        run: |
+          [ -n "$SUPABASE_ACCESS_TOKEN" ] || { echo "::error::Missing GitHub secret SUPABASE_ACCESS_TOKEN"; exit 1; }
+          [ -n "$SUPABASE_DB_PASSWORD" ] || { echo "::error::Missing GitHub secret SUPABASE_DB_PASSWORD (the database password of the project)"; exit 1; }
+          [ -n "$PROJECT_REF" ] || { echo "::error::Missing GitHub secret SUPABASE_PROJECT_REF"; exit 1; }
       - uses: supabase/setup-cli@v1
         with:
           version: latest
       - run: supabase link --project-ref "$PROJECT_REF"
-      - run: supabase db push
+      # --remote: without it the CLI targets a local Docker database, which does not exist here.
+      - run: supabase db push --remote
