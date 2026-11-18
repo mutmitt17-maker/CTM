@@ -4,9 +4,10 @@ import com.ctm.credit.agent.AgentApi
 import com.ctm.credit.agent.AgentSession
 import com.ctm.credit.agent.CatalogItem
 import com.ctm.credit.agent.CreditPolicy
-// CalculatorVerifier.verify() sera appelé avec le CalculatorSpec parsé depuis JSON
-// (parsing JSON avec Gson dans :app-agent Android — absent ici car Kotlin pur)
+import com.ctm.credit.model.CalculatorVerifier
+import com.ctm.credit.model.VerificationResult
 import com.ctm.credit.network.SyncEngine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +26,11 @@ class HomeViewModel(
     private val scope: CoroutineScope,
     /** Catalogue mis en cache localement (Room). Null si aucun téléchargement n'a encore eu lieu. */
     private val cachedCatalogue: Pair<List<CatalogItem>, CreditPolicy>? = null,
+    /**
+     * Résultat de la vérification du calculateur au moment où le catalogue en cache a été téléchargé.
+     * Faux par défaut : sans cette information, la simulation hors ligne reste désactivée (sécurité).
+     */
+    private val cachedCalculatorOk: Boolean = false,
 ) {
     sealed class State {
         object Loading : State()
@@ -50,14 +56,16 @@ class HomeViewModel(
                 // Catalogue : réseau d'abord, cache ensuite.
                 val (items, policy, calculatorOk) = try {
                     val r = api.offlineCatalogue()
-                    // Le parsing JSON + CalculatorVerifier.verify() sera fait dans l'implémentation Android
-                    // (Gson non disponible dans ce module Kotlin pur). On considère le calculateur OK ici.
-                    Triple(r.items, r.policy, true)
+                    // Un seul écart avec les vecteurs du serveur désactive la simulation hors ligne.
+                    val ok = CalculatorVerifier.verify(r.calculatorSpec) is VerificationResult.Ok
+                    Triple(r.items, r.policy, ok)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (_: Exception) {
                     val (ci, cp) = cachedCatalogue ?: throw IllegalStateException(
                         "Aucun catalogue disponible. Connectez-vous au réseau pour le premier téléchargement."
                     )
-                    Triple(ci, cp, true) // on fait confiance au cache
+                    Triple(ci, cp, cachedCalculatorOk)
                 }
 
                 // Synchronisation en arrière-plan.
@@ -65,6 +73,8 @@ class HomeViewModel(
                 scope.launch { syncEngine.runOnce() }
 
                 _state.value = State.Ready(session, items, policy, calculatorOk, pending)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _state.value = State.Error(e.message ?: "Erreur inconnue")
             }

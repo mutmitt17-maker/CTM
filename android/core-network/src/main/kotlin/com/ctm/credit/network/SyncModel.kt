@@ -15,13 +15,6 @@ enum class SyncAction(val wire: String) {
     CONSENT_RECORD("consent.record"),
     APPLICATION_SUBMIT("application.submit"),
     PAYMENT_CASH("payment.cash"),
-    // Livraison
-    START_DELIVERY("start_delivery"),
-    VERIFY_DELIVERY_IMEI("verify_delivery_imei"),
-    RECORD_HANDOVER_PROOF("record_handover_proof"),
-    COMPLETE_DELIVERY("complete_delivery"),
-    REQUEST_MDM_ENROLLMENT("request_mdm_enrollment"),
-    COMPLETE_COLLECTION_TASK("complete_collection_task"),
     ;
 
     companion object {

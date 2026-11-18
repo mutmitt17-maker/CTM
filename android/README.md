@@ -7,7 +7,7 @@ Projet Gradle multi-modules. État actuel : **jalons 1-4**.
 | `:core-model` | Calculateur de crédit identique au serveur, simulateur, validations (IMEI, téléphone). Kotlin pur, sans Android. | ✅ fait, testé |
 | `:core-network` | Moteur de synchronisation hors ligne (file, reprise avec la même clé, conflits), classement des erreurs de l'API, messages en français. Kotlin pur. | ✅ fait, testé |
 | `:core-security` | Interfaces : TokenStore (jetons), DeviceFingerprint (empreinte), BiometricGate (biométrie), DatabaseKey (clé SQLCipher), PhotoVault (photos KYC/livraison). Kotlin pur, implémentations Android dans `:app-agent`. | ✅ fait, testé |
-| `:app-agent` | ViewModels : Login, Home (catalogue + sync), Customer (nouveau client), Application (dossier + simulation hors ligne), Delivery (flux livraison), Payment (encaissement). Kotlin pur. | ✅ fait, testé |
+| `:app-agent` | ViewModels : Login, Home (catalogue + vérification du calculateur), Customer (nouveau client), Application (dossier + simulation hors ligne), Delivery (livraison en ligne), Payment (encaissement par numéro de contrat). Kotlin pur. | ✅ fait, testé contre le contrat du serveur |
 | `:app-client` | Application client (OTP, contrat, paiements) | 🔜 jalons 5-6 |
 
 Les décisions de conception sont dans le prompt du projet. Les manques du serveur sont dans `BACKEND_GAPS.md`.
@@ -27,17 +27,19 @@ gradle :core-model:test :core-network:test :core-security:test :app-agent:test
 
 ```
 LoginViewModel      → AgentApi.login() → TokenStore.save()
-HomeViewModel       → AgentApi.me() + offlineCatalogue() + SyncEngine.runOnce()
+HomeViewModel       → AgentApi.me() + offlineCatalogue() + CalculatorVerifier + SyncEngine.runOnce()
 CustomerViewModel   → SyncEngine.enqueue(customer.create)
 ApplicationViewModel→ LoanSimulator.simulate() hors ligne + SyncEngine.enqueue(application.submit)
-DeliveryViewModel   → SyncEngine.enqueue(start_delivery / verify_imei / record_proof / complete)
-PaymentViewModel    → SyncEngine.enqueue(payment.cash)
+DeliveryViewModel   → AgentApi (appels directs EN LIGNE : start_delivery, verify_delivery_imei, record_handover_proof, complete_delivery)
+PaymentViewModel    → SyncEngine.enqueue(payment.cash)  (champ contract_number, résolu par le serveur)
 ```
 
 Chaque ViewModel :
 - **Ne dépend pas d'Android** (pas d'Activity, pas de Context) → testable en Kotlin pur avec JUnit.
 - Expose un `StateFlow<State>` observable depuis l'UI.
-- Utilise des interfaces (`AgentApi`, `SyncEngine`, `TokenStore`, `PhotoVault`) injectées par le constructeur.
+- Utilise des interfaces (`AgentApi`, `SyncEngine`, `TokenStore`, `DeviceFingerprint`) injectées par le constructeur.
+- Les payloads des actions de sync reprennent **exactement** les noms de champs du serveur (`process_sync_action`) ; les tests les vérifient.
+- Seules 7 actions passent par `sync_batch` : customer.create/update, kyc.submit, emergency_contact.add, consent.record, application.submit, payment.cash. La livraison n'en fait pas partie.
 
 ## Règle d'or du calculateur
 

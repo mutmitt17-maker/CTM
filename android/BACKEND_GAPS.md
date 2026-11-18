@@ -43,3 +43,6 @@ Les routes et formats ci-dessous sont des **propositions** à valider avant d'é
   `application is not in the approved state`, `only an approved application can be delivered`,
   `the person who approved the file cannot hand over the device`, `agent not allowed`.
 - Proposition : ajouter un champ `reason` stable (`delivery_not_available`, `imei_not_verified`, `proof_already_recorded`, `proof_missing`, `mdm_already_enrolled`, `mdm_not_enrolled`, `application_not_approved`, `approver_cannot_deliver`, `agent_not_allowed`).
+
+## 9. Paiement en espèces par numéro de contrat
+- `payment.cash` accepte maintenant `contract_number` (par exemple `CT-2026-000123`) à la place de `contract_id` : migration `20261118100000_payment_cash_by_contract_number.sql`. L'agent saisit le numéro, le serveur retrouve le contrat. Un numéro inconnu donne `unknown_contract`.
