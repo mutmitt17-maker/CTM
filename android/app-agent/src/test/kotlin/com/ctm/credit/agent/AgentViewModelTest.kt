@@ -117,7 +117,7 @@ class CustomerViewModelTest {
         nationalId = "ID-123", address = "Av. de la Paix 12", city = "Lubumbashi",
     )
 
-    @Test fun `client valide : les champs correspondent au serveur`() = scope.runTest {
+    @Test fun `client valide - les champs correspondent au serveur`() = scope.runTest {
         val store = FakeSyncStore()
         val vm = CustomerViewModel(SyncEngine(store, FakeSyncApi()), backgroundScope)
         vm.submit(form())
@@ -133,7 +133,7 @@ class CustomerViewModelTest {
         assertTrue(item.payloadJson.contains("\"phone_number\":\"+243812345678\""))
     }
 
-    @Test fun `numéro de téléphone invalide : rien n'est mis en file`() = scope.runTest {
+    @Test fun `numéro de téléphone invalide - rien n'est mis en file`() = scope.runTest {
         val store = FakeSyncStore()
         val vm = CustomerViewModel(SyncEngine(store, FakeSyncApi()), backgroundScope)
         vm.submit(form().copy(phone = "0812345678"))
@@ -168,7 +168,7 @@ class ApplicationViewModelTest {
         customerId = "cust-1", item = item, downPayment = down, durationDays = days, frequency = Frequency.MONTHLY,
     )
 
-    @Test fun `simulation correcte : 150 USD, acompte 30, total 131,97`() = scope.runTest {
+    @Test fun `simulation correcte - 150 USD, acompte 30, total 131,97`() = scope.runTest {
         val vm = ApplicationViewModel(engine(), testPolicy(), backgroundScope)
         vm.simulate(form())
         // frais 4,50 ; financé 124,50 ; intérêt 7,47 ; total 131,97
@@ -202,7 +202,7 @@ class ApplicationViewModelTest {
         assertTrue(vm.state.value is ApplicationViewModel.State.Error)
     }
 
-    @Test fun `submit : champs du serveur et total attendu`() = scope.runTest {
+    @Test fun `submit - champs du serveur et total attendu`() = scope.runTest {
         val store = FakeSyncStore()
         val vm = ApplicationViewModel(SyncEngine(store, FakeSyncApi()), testPolicy(), backgroundScope)
         val f = form()
@@ -252,7 +252,7 @@ class DeliveryViewModelTest {
         assertEquals(DeliveryViewModel.State.Completed("deliv-1"), vm.state.value)
     }
 
-    @Test fun `IMEI invalide : aucun appel au serveur`() = scope.runTest {
+    @Test fun `IMEI invalide - aucun appel au serveur`() = scope.runTest {
         val api = FakeAgentApi()
         val vm = DeliveryViewModel(api, ConstantFingerprint(), backgroundScope)
         vm.verifyImei("deliv-1", BAD_IMEI)
@@ -301,7 +301,7 @@ class PaymentViewModelTest {
     private val scope = TestScope(dispatcher)
     private fun engine() = SyncEngine(FakeSyncStore(), FakeSyncApi())
 
-    @Test fun `paiement valide : numéro de contrat et montant envoyés au serveur`() = scope.runTest {
+    @Test fun `paiement valide - numéro de contrat et montant envoyés au serveur`() = scope.runTest {
         val store = FakeSyncStore()
         val vm = PaymentViewModel(SyncEngine(store, FakeSyncApi()), backgroundScope)
         vm.submit(PaymentViewModel.Form(" ct-2026-000123 ", "25,50", ""))
