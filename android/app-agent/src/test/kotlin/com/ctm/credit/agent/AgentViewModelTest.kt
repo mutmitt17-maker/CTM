@@ -27,7 +27,7 @@ class LoginViewModelTest {
 
     @Test fun `login réussi sauvegarde les jetons et passe à Success`() = scope.runTest {
         val tokenStore = InMemoryTokenStore()
-        val vm = LoginViewModel(FakeAgentApi(), tokenStore, backgroundScope)
+        val vm = LoginViewModel(FakeAgentApi(), tokenStore, this)
         vm.login("agent@ctm.cd", "secret")
         dispatcher.scheduler.advanceUntilIdle()
         assertTrue(tokenStore.isLoggedIn())
@@ -35,20 +35,20 @@ class LoginViewModelTest {
     }
 
     @Test fun `email vide renvoie une erreur immédiate`() = scope.runTest {
-        val vm = LoginViewModel(FakeAgentApi(), InMemoryTokenStore(), backgroundScope)
+        val vm = LoginViewModel(FakeAgentApi(), InMemoryTokenStore(), this)
         vm.login("", "secret")
         assertTrue(vm.state.value is LoginViewModel.State.Error)
     }
 
     @Test fun `mot de passe vide renvoie une erreur immédiate`() = scope.runTest {
-        val vm = LoginViewModel(FakeAgentApi(), InMemoryTokenStore(), backgroundScope)
+        val vm = LoginViewModel(FakeAgentApi(), InMemoryTokenStore(), this)
         vm.login("agent@ctm.cd", "")
         assertTrue(vm.state.value is LoginViewModel.State.Error)
     }
 
     @Test fun `login échoué renvoie Error avec le message`() = scope.runTest {
         val api = FakeAgentApi(loginResult = AgentApi.LoginResult.Failure("Identifiants incorrects."))
-        val vm = LoginViewModel(api, InMemoryTokenStore(), backgroundScope)
+        val vm = LoginViewModel(api, InMemoryTokenStore(), this)
         vm.login("agent@ctm.cd", "wrong")
         dispatcher.scheduler.advanceUntilIdle()
         val state = vm.state.value
@@ -64,7 +64,7 @@ class HomeViewModelTest {
     private fun engine() = SyncEngine(FakeSyncStore(), FakeSyncApi())
 
     @Test fun `calculateur conforme au serveur`() = scope.runTest {
-        val vm = HomeViewModel(FakeAgentApi(), engine(), backgroundScope)
+        val vm = HomeViewModel(FakeAgentApi(), engine(), this)
         vm.load()
         dispatcher.scheduler.advanceUntilIdle()
         val ready = vm.state.value as HomeViewModel.State.Ready
@@ -74,7 +74,7 @@ class HomeViewModelTest {
 
     @Test fun `un seul écart avec le serveur désactive la simulation`() = scope.runTest {
         val bad = AgentApi.OfflineCatalogueResult(listOf(SAMSUNG), testPolicy(), divergentSpec())
-        val vm = HomeViewModel(FakeAgentApi(catalogue = bad), engine(), backgroundScope)
+        val vm = HomeViewModel(FakeAgentApi(catalogue = bad), engine(), this)
         vm.load()
         dispatcher.scheduler.advanceUntilIdle()
         val ready = vm.state.value as HomeViewModel.State.Ready
@@ -83,7 +83,7 @@ class HomeViewModelTest {
 
     @Test fun `sans réseau le cache est utilisé et la simulation reste désactivée par défaut`() = scope.runTest {
         val cache = listOf(SAMSUNG) to testPolicy()
-        val vm = HomeViewModel(FakeAgentApi(catalogueFails = true), engine(), backgroundScope, cache)
+        val vm = HomeViewModel(FakeAgentApi(catalogueFails = true), engine(), this, cache)
         vm.load()
         dispatcher.scheduler.advanceUntilIdle()
         val ready = vm.state.value as HomeViewModel.State.Ready
@@ -93,14 +93,14 @@ class HomeViewModelTest {
 
     @Test fun `sans réseau le cache vérifié garde la simulation active`() = scope.runTest {
         val cache = listOf(SAMSUNG) to testPolicy()
-        val vm = HomeViewModel(FakeAgentApi(catalogueFails = true), engine(), backgroundScope, cache, cachedCalculatorOk = true)
+        val vm = HomeViewModel(FakeAgentApi(catalogueFails = true), engine(), this, cache, cachedCalculatorOk = true)
         vm.load()
         dispatcher.scheduler.advanceUntilIdle()
         assertTrue((vm.state.value as HomeViewModel.State.Ready).calculatorOk)
     }
 
     @Test fun `sans réseau et sans cache renvoie une erreur`() = scope.runTest {
-        val vm = HomeViewModel(FakeAgentApi(catalogueFails = true), engine(), backgroundScope)
+        val vm = HomeViewModel(FakeAgentApi(catalogueFails = true), engine(), this)
         vm.load()
         dispatcher.scheduler.advanceUntilIdle()
         assertTrue(vm.state.value is HomeViewModel.State.Error)
@@ -119,7 +119,7 @@ class CustomerViewModelTest {
 
     @Test fun `client valide - les champs correspondent au serveur`() = scope.runTest {
         val store = FakeSyncStore()
-        val vm = CustomerViewModel(SyncEngine(store, FakeSyncApi()), backgroundScope)
+        val vm = CustomerViewModel(SyncEngine(store, FakeSyncApi()), this)
         vm.submit(form())
         dispatcher.scheduler.advanceUntilIdle()
         val queued = vm.state.value as CustomerViewModel.State.Queued
@@ -135,7 +135,7 @@ class CustomerViewModelTest {
 
     @Test fun `numéro de téléphone invalide - rien n'est mis en file`() = scope.runTest {
         val store = FakeSyncStore()
-        val vm = CustomerViewModel(SyncEngine(store, FakeSyncApi()), backgroundScope)
+        val vm = CustomerViewModel(SyncEngine(store, FakeSyncApi()), this)
         vm.submit(form().copy(phone = "0812345678"))
         assertTrue(vm.state.value is CustomerViewModel.State.Error)
         assertTrue(store.items.isEmpty())
@@ -143,7 +143,7 @@ class CustomerViewModelTest {
 
     @Test fun `guillemets et antislash dans un nom sont échappés`() = scope.runTest {
         val store = FakeSyncStore()
-        val vm = CustomerViewModel(SyncEngine(store, FakeSyncApi()), backgroundScope)
+        val vm = CustomerViewModel(SyncEngine(store, FakeSyncApi()), this)
         vm.submit(form(first = "Jean \"JJ\" \\ Dupont"))
         dispatcher.scheduler.advanceUntilIdle()
         assertTrue(store.items.single().payloadJson.contains("\"first_name\":\"Jean \\\"JJ\\\" \\\\ Dupont\""))
@@ -151,7 +151,7 @@ class CustomerViewModelTest {
 
     @Test fun `ville vide est envoyée comme null`() = scope.runTest {
         val store = FakeSyncStore()
-        val vm = CustomerViewModel(SyncEngine(store, FakeSyncApi()), backgroundScope)
+        val vm = CustomerViewModel(SyncEngine(store, FakeSyncApi()), this)
         vm.submit(form().copy(city = ""))
         dispatcher.scheduler.advanceUntilIdle()
         assertTrue(store.items.single().payloadJson.contains("\"city\":null"))
@@ -169,7 +169,7 @@ class ApplicationViewModelTest {
     )
 
     @Test fun `simulation correcte - 150 USD, acompte 30, total 131,97`() = scope.runTest {
-        val vm = ApplicationViewModel(engine(), testPolicy(), backgroundScope)
+        val vm = ApplicationViewModel(engine(), testPolicy(), this)
         vm.simulate(form())
         // frais 4,50 ; financé 124,50 ; intérêt 7,47 ; total 131,97
         val ready = vm.state.value as ApplicationViewModel.State.SimulationReady
@@ -177,19 +177,19 @@ class ApplicationViewModelTest {
     }
 
     @Test fun `prix avec centimes ne plante pas`() = scope.runTest {
-        val vm = ApplicationViewModel(engine(), testPolicy(), backgroundScope)
+        val vm = ApplicationViewModel(engine(), testPolicy(), this)
         vm.simulate(form(item = CatalogItem("item-9", "Infinix", "Hot 40", 149.99, null)))
         assertTrue(vm.state.value is ApplicationViewModel.State.SimulationReady)
     }
 
     @Test fun `acompte avec 3 décimales est refusé sans exception`() = scope.runTest {
-        val vm = ApplicationViewModel(engine(), testPolicy(), backgroundScope)
+        val vm = ApplicationViewModel(engine(), testPolicy(), this)
         vm.simulate(form(down = "30.555"))
         assertTrue(vm.state.value is ApplicationViewModel.State.Error)
     }
 
     @Test fun `acompte inférieur au minimum renvoie une erreur`() = scope.runTest {
-        val vm = ApplicationViewModel(engine(), testPolicy(), backgroundScope)
+        val vm = ApplicationViewModel(engine(), testPolicy(), this)
         vm.simulate(form(down = "10")) // minimum = 20 % de 150 = 30 USD
         val state = vm.state.value
         assertTrue(state is ApplicationViewModel.State.Error)
@@ -197,14 +197,14 @@ class ApplicationViewModelTest {
     }
 
     @Test fun `durée non autorisée renvoie une erreur`() = scope.runTest {
-        val vm = ApplicationViewModel(engine(), testPolicy(), backgroundScope)
+        val vm = ApplicationViewModel(engine(), testPolicy(), this)
         vm.simulate(form(days = 45))
         assertTrue(vm.state.value is ApplicationViewModel.State.Error)
     }
 
     @Test fun `submit - champs du serveur et total attendu`() = scope.runTest {
         val store = FakeSyncStore()
-        val vm = ApplicationViewModel(SyncEngine(store, FakeSyncApi()), testPolicy(), backgroundScope)
+        val vm = ApplicationViewModel(SyncEngine(store, FakeSyncApi()), testPolicy(), this)
         val f = form()
         vm.simulate(f)
         val ready = vm.state.value as ApplicationViewModel.State.SimulationReady
@@ -232,7 +232,7 @@ class DeliveryViewModelTest {
 
     @Test fun `flux complet de livraison par appels directs`() = scope.runTest {
         val api = FakeAgentApi()
-        val vm = DeliveryViewModel(api, ConstantFingerprint("fp-agent"), backgroundScope)
+        val vm = DeliveryViewModel(api, ConstantFingerprint("fp-agent"), this)
 
         vm.startDelivery("app-1")
         dispatcher.scheduler.advanceUntilIdle()
@@ -254,7 +254,7 @@ class DeliveryViewModelTest {
 
     @Test fun `IMEI invalide - aucun appel au serveur`() = scope.runTest {
         val api = FakeAgentApi()
-        val vm = DeliveryViewModel(api, ConstantFingerprint(), backgroundScope)
+        val vm = DeliveryViewModel(api, ConstantFingerprint(), this)
         vm.verifyImei("deliv-1", BAD_IMEI)
         val state = vm.state.value as DeliveryViewModel.State.Error
         assertEquals(DeliveryViewModel.State.Started("deliv-1"), state.previousState)
@@ -263,7 +263,7 @@ class DeliveryViewModelTest {
 
     @Test fun `IMEI refusé par le serveur reste à l'étape précédente`() = scope.runTest {
         val api = FakeAgentApi().apply { imeiResult = ApiResult.Ok(ImeiCheck(matched = false, reason = "mismatch")) }
-        val vm = DeliveryViewModel(api, ConstantFingerprint(), backgroundScope)
+        val vm = DeliveryViewModel(api, ConstantFingerprint(), this)
         vm.verifyImei("deliv-1", VALID_IMEI)
         dispatcher.scheduler.advanceUntilIdle()
         val state = vm.state.value as DeliveryViewModel.State.Error
@@ -272,7 +272,7 @@ class DeliveryViewModelTest {
 
     @Test fun `erreur du serveur au démarrage est affichée`() = scope.runTest {
         val api = FakeAgentApi().apply { startResult = ApiResult.Failure("Livraison indisponible pour cet agent.") }
-        val vm = DeliveryViewModel(api, ConstantFingerprint(), backgroundScope)
+        val vm = DeliveryViewModel(api, ConstantFingerprint(), this)
         vm.startDelivery("app-1")
         dispatcher.scheduler.advanceUntilIdle()
         assertEquals("Livraison indisponible pour cet agent.", (vm.state.value as DeliveryViewModel.State.Error).message)
@@ -280,7 +280,7 @@ class DeliveryViewModelTest {
 
     @Test fun `coupure réseau devient un message d'erreur`() = scope.runTest {
         val api = FakeAgentApi().apply { startThrows = true }
-        val vm = DeliveryViewModel(api, ConstantFingerprint(), backgroundScope)
+        val vm = DeliveryViewModel(api, ConstantFingerprint(), this)
         vm.startDelivery("app-1")
         dispatcher.scheduler.advanceUntilIdle()
         assertTrue(vm.state.value is DeliveryViewModel.State.Error)
@@ -288,7 +288,7 @@ class DeliveryViewModelTest {
 
     @Test fun `preuve sans photo ou sans signature est refusée`() = scope.runTest {
         val api = FakeAgentApi()
-        val vm = DeliveryViewModel(api, ConstantFingerprint(), backgroundScope)
+        val vm = DeliveryViewModel(api, ConstantFingerprint(), this)
         vm.recordProof("deliv-1", "", "sighash")
         assertTrue(vm.state.value is DeliveryViewModel.State.Error)
         assertTrue(api.proofCalls.isEmpty())
@@ -303,7 +303,7 @@ class PaymentViewModelTest {
 
     @Test fun `paiement valide - numéro de contrat et montant envoyés au serveur`() = scope.runTest {
         val store = FakeSyncStore()
-        val vm = PaymentViewModel(SyncEngine(store, FakeSyncApi()), backgroundScope)
+        val vm = PaymentViewModel(SyncEngine(store, FakeSyncApi()), this)
         vm.submit(PaymentViewModel.Form(" ct-2026-000123 ", "25,50", ""))
         dispatcher.scheduler.advanceUntilIdle()
         val state = vm.state.value as PaymentViewModel.State.Queued
@@ -318,26 +318,26 @@ class PaymentViewModelTest {
     }
 
     @Test fun `montant nul renvoie une erreur`() = scope.runTest {
-        val vm = PaymentViewModel(engine(), backgroundScope)
+        val vm = PaymentViewModel(engine(), this)
         vm.submit(PaymentViewModel.Form("CT-2026-000123", "0", ""))
         assertTrue(vm.state.value is PaymentViewModel.State.Error)
     }
 
     @Test fun `montant avec 3 décimales est refusé`() = scope.runTest {
-        val vm = PaymentViewModel(engine(), backgroundScope)
+        val vm = PaymentViewModel(engine(), this)
         vm.submit(PaymentViewModel.Form("CT-2026-000123", "10.005", ""))
         assertTrue(vm.state.value is PaymentViewModel.State.Error)
     }
 
     @Test fun `contrat vide renvoie une erreur`() = scope.runTest {
-        val vm = PaymentViewModel(engine(), backgroundScope)
+        val vm = PaymentViewModel(engine(), this)
         vm.submit(PaymentViewModel.Form("", "25", ""))
         assertTrue(vm.state.value is PaymentViewModel.State.Error)
     }
 
     @Test fun `numéro de contrat au mauvais format est refusé`() = scope.runTest {
         val store = FakeSyncStore()
-        val vm = PaymentViewModel(SyncEngine(store, FakeSyncApi()), backgroundScope)
+        val vm = PaymentViewModel(SyncEngine(store, FakeSyncApi()), this)
         vm.submit(PaymentViewModel.Form("CTM-00001", "25", ""))
         assertTrue(vm.state.value is PaymentViewModel.State.Error)
         assertTrue(store.items.isEmpty())
