@@ -12,7 +12,7 @@ on:
 
 jobs:
   unit-tests:
-    name: Tests unitaires (core-model et core-network)
+    name: Tests unitaires (core-model, core-network, core-security, app-agent)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -27,7 +27,7 @@ jobs:
         with:
           gradle-version: "8.14.3"
       - name: Compile et teste
-        run: gradle :core-model:test :core-network:test --no-daemon --stacktrace
+        run: gradle :core-model:test :core-network:test :core-security:test :app-agent:test --no-daemon --stacktrace
       - name: Rapports de tests
         if: always()
         uses: actions/upload-artifact@v4
@@ -36,4 +36,6 @@ jobs:
           path: |
             android/core-model/build/reports/tests/test
             android/core-network/build/reports/tests/test
+            android/core-security/build/reports/tests/test
+            android/app-agent/build/reports/tests/test
           if-no-files-found: ignore

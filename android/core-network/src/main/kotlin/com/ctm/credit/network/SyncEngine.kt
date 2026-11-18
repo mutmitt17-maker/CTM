@@ -11,6 +11,9 @@ interface SyncStore {
     fun blockedEntities(): Set<String>
 
     fun save(item: SyncItem)
+
+    /** Nombre d'items en attente d'envoi (PENDING + SENT non encore confirmés). */
+    fun pendingCount(): Int = sendable(Int.MAX_VALUE, emptySet()).size
 }
 
 /** The network call. Throws [ApiException] when the request did not give a usable answer. */
@@ -53,6 +56,12 @@ class SyncEngine(
     }
 
     private val dependencyErrors = setOf("unknown_customer", "unknown_device", "unknown_contract")
+
+    /** Ajoute un item à la file (raccourci vers store.save). */
+    fun enqueue(item: SyncItem) = store.save(item)
+
+    /** Nombre d'items en attente d'envoi (délègue à SyncStore). */
+    fun pendingCount(): Int = store.pendingCount()
 
     fun runOnce(): SyncReport {
         var applied = 0
