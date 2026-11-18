@@ -18,18 +18,18 @@ class ClientLoginViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val scope = TestScope(dispatcher)
 
-    @Test fun `numéro valide - le code est envoyé`() = scope.runTest {
+    @Test fun `numéro valide : le code est envoyé`() = scope.runTest {
         val api = FakeClientApi()
-        val vm = ClientLoginViewModel(api, InMemoryTokenStore(), this)
+        val vm = ClientLoginViewModel(api, InMemoryTokenStore(), backgroundScope)
         vm.requestCode(" $PHONE ")
         dispatcher.scheduler.advanceUntilIdle()
         assertEquals(ClientLoginViewModel.State.EnterCode(PHONE), vm.state.value)
         assertEquals(listOf(PHONE), api.otpRequests)
     }
 
-    @Test fun `numéro invalide - aucun appel au serveur`() = scope.runTest {
+    @Test fun `numéro invalide : aucun appel au serveur`() = scope.runTest {
         val api = FakeClientApi()
-        val vm = ClientLoginViewModel(api, InMemoryTokenStore(), this)
+        val vm = ClientLoginViewModel(api, InMemoryTokenStore(), backgroundScope)
         vm.requestCode("0812345678")
         assertTrue(vm.state.value is ClientLoginViewModel.State.Error)
         assertTrue(api.otpRequests.isEmpty())
@@ -37,15 +37,15 @@ class ClientLoginViewModelTest {
 
     @Test fun `échec d'envoi du code garde le message du serveur`() = scope.runTest {
         val api = FakeClientApi().apply { otpResult = ClientResult.Failure("Trop de demandes.") }
-        val vm = ClientLoginViewModel(api, InMemoryTokenStore(), this)
+        val vm = ClientLoginViewModel(api, InMemoryTokenStore(), backgroundScope)
         vm.requestCode(PHONE)
         dispatcher.scheduler.advanceUntilIdle()
         assertEquals(ClientLoginViewModel.State.Error("Trop de demandes.", null), vm.state.value)
     }
 
-    @Test fun `code correct - jetons sauvegardés et connecté`() = scope.runTest {
+    @Test fun `code correct : jetons sauvegardés et connecté`() = scope.runTest {
         val store = InMemoryTokenStore()
-        val vm = ClientLoginViewModel(FakeClientApi(), store, this)
+        val vm = ClientLoginViewModel(FakeClientApi(), store, backgroundScope)
         vm.verifyCode(PHONE, "123456")
         dispatcher.scheduler.advanceUntilIdle()
         assertEquals(ClientLoginViewModel.State.LoggedIn, vm.state.value)
@@ -53,27 +53,27 @@ class ClientLoginViewModelTest {
         assertEquals("ref", store.refreshToken())
     }
 
-    @Test fun `mauvais code - on reste sur l'écran du code`() = scope.runTest {
+    @Test fun `mauvais code : on reste sur l'écran du code`() = scope.runTest {
         val api = FakeClientApi().apply { verifyResult = ClientResult.Failure("Code incorrect.") }
         val store = InMemoryTokenStore()
-        val vm = ClientLoginViewModel(api, store, this)
+        val vm = ClientLoginViewModel(api, store, backgroundScope)
         vm.verifyCode(PHONE, "123456")
         dispatcher.scheduler.advanceUntilIdle()
         assertEquals(ClientLoginViewModel.State.Error("Code incorrect.", PHONE), vm.state.value)
         assertNull(store.accessToken())
     }
 
-    @Test fun `code non numérique - aucun appel au serveur`() = scope.runTest {
+    @Test fun `code non numérique : aucun appel au serveur`() = scope.runTest {
         val api = FakeClientApi()
-        val vm = ClientLoginViewModel(api, InMemoryTokenStore(), this)
+        val vm = ClientLoginViewModel(api, InMemoryTokenStore(), backgroundScope)
         vm.verifyCode(PHONE, "12a456")
         assertTrue(vm.state.value is ClientLoginViewModel.State.Error)
         assertTrue(api.verifyRequests.isEmpty())
     }
 
-    @Test fun `session déjà ouverte - démarre connecté, et la déconnexion efface les jetons`() = scope.runTest {
+    @Test fun `session déjà ouverte : démarre connecté, et la déconnexion efface les jetons`() = scope.runTest {
         val store = InMemoryTokenStore().apply { save("a", "r") }
-        val vm = ClientLoginViewModel(FakeClientApi(), store, this)
+        val vm = ClientLoginViewModel(FakeClientApi(), store, backgroundScope)
         assertEquals(ClientLoginViewModel.State.LoggedIn, vm.state.value)
         vm.logout()
         assertEquals(ClientLoginViewModel.State.EnterPhone, vm.state.value)
@@ -86,8 +86,8 @@ class ContractViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val scope = TestScope(dispatcher)
 
-    @Test fun `un seul contrat - ouvre directement le détail trié`() = scope.runTest {
-        val vm = ContractViewModel(FakeClientApi(), this)
+    @Test fun `un seul contrat : ouvre directement le détail trié`() = scope.runTest {
+        val vm = ContractViewModel(FakeClientApi(), backgroundScope)
         vm.load()
         dispatcher.scheduler.advanceUntilIdle()
         val detail = (vm.state.value as ContractViewModel.State.Detail).detail
@@ -98,10 +98,10 @@ class ContractViewModelTest {
         assertFalse(detail.isLocked)
     }
 
-    @Test fun `plusieurs contrats - la liste est affichée`() = scope.runTest {
+    @Test fun `plusieurs contrats : la liste est affichée`() = scope.runTest {
         val other = CONTRACT.copy(id = "c-2", contractNumber = "CT-2026-000124")
         val api = FakeClientApi().apply { contracts = ClientResult.Ok(listOf(CONTRACT, other)) }
-        val vm = ContractViewModel(api, this)
+        val vm = ContractViewModel(api, backgroundScope)
         vm.load()
         dispatcher.scheduler.advanceUntilIdle()
         assertEquals(2, (vm.state.value as ContractViewModel.State.Contracts).contracts.size)
@@ -109,7 +109,7 @@ class ContractViewModelTest {
 
     @Test fun `aucun contrat`() = scope.runTest {
         val api = FakeClientApi().apply { contracts = ClientResult.Ok(emptyList()) }
-        val vm = ContractViewModel(api, this)
+        val vm = ContractViewModel(api, backgroundScope)
         vm.load()
         dispatcher.scheduler.advanceUntilIdle()
         assertEquals(ContractViewModel.State.NoContract, vm.state.value)
@@ -117,7 +117,7 @@ class ContractViewModelTest {
 
     @Test fun `appareil verrouillé est signalé`() = scope.runTest {
         val api = FakeClientApi().apply { statusResult = ClientResult.Ok(status(deviceState = "locked", overdue = 20)) }
-        val vm = ContractViewModel(api, this)
+        val vm = ContractViewModel(api, backgroundScope)
         vm.load()
         dispatcher.scheduler.advanceUntilIdle()
         assertTrue((vm.state.value as ContractViewModel.State.Detail).detail.isLocked)
@@ -125,7 +125,7 @@ class ContractViewModelTest {
 
     @Test fun `erreur serveur sur l'échéancier devient un message`() = scope.runTest {
         val api = FakeClientApi().apply { scheduleResult = ClientResult.Failure("Contrat non visible.") }
-        val vm = ContractViewModel(api, this)
+        val vm = ContractViewModel(api, backgroundScope)
         vm.load()
         dispatcher.scheduler.advanceUntilIdle()
         assertEquals(ContractViewModel.State.Error("Contrat non visible."), vm.state.value)
@@ -133,7 +133,7 @@ class ContractViewModelTest {
 
     @Test fun `coupure réseau devient un message sans planter`() = scope.runTest {
         val api = FakeClientApi().apply { throwOnContracts = true }
-        val vm = ContractViewModel(api, this)
+        val vm = ContractViewModel(api, backgroundScope)
         vm.load()
         dispatcher.scheduler.advanceUntilIdle()
         assertTrue(vm.state.value is ContractViewModel.State.Error)
@@ -141,7 +141,7 @@ class ContractViewModelTest {
 
     @Test fun `refresh recharge le contrat ouvert`() = scope.runTest {
         val api = FakeClientApi()
-        val vm = ContractViewModel(api, this)
+        val vm = ContractViewModel(api, backgroundScope)
         vm.load()
         dispatcher.scheduler.advanceUntilIdle()
         api.paymentsResult = ClientResult.Ok(emptyList())
@@ -163,9 +163,9 @@ class PayInstructionsViewModelTest {
         return (vm.state.value as ContractViewModel.State.Detail).detail
     }
 
-    @Test fun `échéance du jour non payée plus pénalités - montant suggéré`() = scope.runTest {
+    @Test fun `échéance du jour non payée plus pénalités : montant suggéré`() = scope.runTest {
         val api = FakeClientApi().apply { statusResult = ClientResult.Ok(status(overdue = 5, penalty = "2.50")) }
-        val vm = PayInstructionsViewModel(api, this) { LocalDate.of(2026, 3, 20) }
+        val vm = PayInstructionsViewModel(api, backgroundScope) { LocalDate.of(2026, 3, 20) }
         vm.prepare(detail(api))
         dispatcher.scheduler.advanceUntilIdle()
         val ready = vm.state.value as PayInstructionsViewModel.State.Ready
@@ -175,9 +175,9 @@ class PayInstructionsViewModelTest {
         assertEquals(listOf("mpesa"), ready.merchants.map { it.provider }) // le numéro inactif est masqué
     }
 
-    @Test fun `rien d'échu - on suggère la prochaine échéance`() = scope.runTest {
+    @Test fun `rien d'échu : on suggère la prochaine échéance`() = scope.runTest {
         val api = FakeClientApi()
-        val vm = PayInstructionsViewModel(api, this) { LocalDate.of(2026, 2, 20) }
+        val vm = PayInstructionsViewModel(api, backgroundScope) { LocalDate.of(2026, 2, 20) }
         vm.prepare(detail(api))
         dispatcher.scheduler.advanceUntilIdle()
         val ready = vm.state.value as PayInstructionsViewModel.State.Ready
@@ -185,25 +185,25 @@ class PayInstructionsViewModelTest {
         assertEquals(0, BigDecimal("100.00").compareTo(ready.suggestedAmount))
     }
 
-    @Test fun `contrat soldé - rien à payer`() = scope.runTest {
+    @Test fun `contrat soldé : rien à payer`() = scope.runTest {
         val api = FakeClientApi().apply {
             scheduleResult = ClientResult.Ok(listOf(installment(1, "2026-02-15", "100.00", "100.00", InstallmentStatus.PAID)))
         }
-        val vm = PayInstructionsViewModel(api, this)
+        val vm = PayInstructionsViewModel(api, backgroundScope)
         vm.prepare(detail(api))
         assertEquals(PayInstructionsViewModel.State.NothingToPay, vm.state.value)
     }
 
     @Test fun `aucun numéro marchand actif`() = scope.runTest {
         val api = FakeClientApi().apply { merchantsResult = ClientResult.Ok(emptyList()) }
-        val vm = PayInstructionsViewModel(api, this)
+        val vm = PayInstructionsViewModel(api, backgroundScope)
         vm.prepare(detail(api))
         dispatcher.scheduler.advanceUntilIdle()
         assertEquals(PayInstructionsViewModel.State.NoMerchant, vm.state.value)
     }
 
-    @Test fun `montant saisi - virgule acceptée, zéro et 3 décimales refusés`() = scope.runTest {
-        val vm = PayInstructionsViewModel(FakeClientApi(), this)
+    @Test fun `montant saisi : virgule acceptée, zéro et 3 décimales refusés`() = scope.runTest {
+        val vm = PayInstructionsViewModel(FakeClientApi(), backgroundScope)
         assertEquals(0, BigDecimal("12.50").compareTo(vm.parseAmount("12,5")))
         assertNull(vm.parseAmount("0"))
         assertNull(vm.parseAmount("1.234"))
