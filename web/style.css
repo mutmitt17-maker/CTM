@@ -50,3 +50,6 @@ pre { background:#f0f2f5; padding:.75rem; border-radius:6px; overflow:auto; }
 .pfield input:disabled { background:#f5f6f8; color:#1c1e21; }
 details.advanced { margin:1rem 0; padding:.5rem 1rem; border:1px dashed #d5d9de; border-radius:8px; }
 details.advanced summary { cursor:pointer; color:#5f6b7a; }
+
+/* Cases à cocher (le style général des champs les étirerait) */
+input[type=checkbox] { display:inline-block; width:auto; margin:0 .5rem 0 0; vertical-align:middle; }

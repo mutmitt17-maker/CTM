@@ -133,6 +133,30 @@ function sameValue(f, a, b) {
   return f.kind === "list" ? JSON.stringify(a) === JSON.stringify(b) : Number(a) === Number(b);
 }
 
+// ---------------------------------------------------------------- erreurs du serveur, en français
+const SERVER_ERRORS = [
+  [/only the system administrator/i, "Seul l'administrateur système peut faire cette action."],
+  [/only Finance can confirm/i, "Seule la Finance peut confirmer un paiement en espèces."],
+  [/the collector cannot confirm/i, "La personne qui a encaissé l'argent ne peut pas confirmer son propre paiement."],
+  [/not a pending cash payment/i, "Ce paiement n'est plus en attente (déjà confirmé ou annulé)."],
+  [/amount exceeds the outstanding balance/i, "Le montant dépasse le solde restant dû du contrat."],
+  [/application is not waiting for a manual review/i, "Ce dossier n'attend plus de décision (déjà traité)."],
+  [/a reason is required/i, "Un motif est obligatoire."],
+  [/reviewer cannot be the person who created/i, "Vous ne pouvez pas décider d'un dossier que vous avez créé."],
+  [/reviewer is not allowed/i, "Votre rôle ou votre limite de montant ne vous permet pas cette décision."],
+  [/unknown or inactive reviewer/i, "Compte inconnu ou inactif."],
+  [/violates check constraint/i, "Une valeur est hors des limites autorisées."],
+];
+
+function friendlyError(msg) {
+  for (const [pattern, text] of SERVER_ERRORS) if (pattern.test(msg)) return text;
+  return msg;
+}
+
+const usd = (n) => `${Number(n).toFixed(2)} USD`;
+const FREQUENCY_LABELS = { daily: "par jour", weekly: "par semaine", monthly: "par mois" };
+const PROVIDERS = [["mpesa", "M-Pesa"], ["airtel_money", "Airtel Money"], ["orange_money", "Orange Money"]];
+
 // ---------------------------------------------------------------- views
 const views = {
   async home(me) {
@@ -311,11 +335,141 @@ const views = {
           h("button", { onclick: () => decide(r.id, false) }, "Rejeter")) },
       ]), out);
   },
+  // Numéros marchands : où le client envoie son paiement Mobile Money (réservé à l'administrateur système).
+  async merchants(me, notice) {
+    const { data, error } = await sb.from("merchant_account").select("provider, merchant_number, display_name, active");
+    if (error) return message("error", error.message);
+    const byProvider = new Map((data ?? []).map((r) => [r.provider, r]));
+    const canEdit = me.role === "system_admin";
+    const out = h("div");
+    if (notice) out.append(message("ok", notice));
+
+    const cards = PROVIDERS.map(([key, label]) => {
+      const cur = byProvider.get(key);
+      const lock = canEdit ? {} : { disabled: "" };
+      const number = h("input", { value: cur?.merchant_number ?? "", placeholder: "+243…", maxlength: "30", ...lock });
+      const name = h("input", { value: cur?.display_name ?? `CTM ${label}`, maxlength: "100", ...lock });
+      const active = h("input", { type: "checkbox", ...((cur?.active ?? true) ? { checked: "" } : {}), ...lock });
+      const result = h("div");
+      const form = h("form", {
+        onsubmit: async (e) => {
+          e.preventDefault();
+          result.replaceChildren();
+          const num = number.value.trim();
+          if (!/^[+0-9 ]{6,30}$/.test(num)) { result.append(message("error", "Numéro invalide : chiffres, espaces et « + » seulement (6 à 30 caractères).")); return; }
+          if (!name.value.trim()) { result.append(message("error", "Le nom affiché est obligatoire.")); return; }
+          try {
+            await api("set_merchant_account", { p_provider: key, p_number: num, p_name: name.value.trim(), p_active: active.checked });
+            show(await views.merchants(me, `${label} : enregistré.`));
+          } catch (err) { result.append(message("error", friendlyError(err.message))); }
+        },
+      },
+        h("label", {}, "Numéro marchand", number),
+        h("label", {}, "Nom affiché au client", name),
+        h("label", {}, active, "Actif (visible dans l'application client)"),
+        canEdit ? h("button", { type: "submit" }, "Enregistrer") : "",
+        result,
+      );
+      return h("div", { class: "pgroup" }, h("h3", {}, label), form);
+    });
+
+    const hasActive = (data ?? []).some((r) => r.active && r.merchant_number);
+    return h("div", { class: "card" }, h("h2", {}, "Numéros marchands (Mobile Money)"),
+      h("p", {}, "Le client paie vers ces numéros en indiquant son numéro de contrat comme référence."),
+      hasActive ? "" : message("error", "Aucun numéro actif : l'application client ne pourra pas afficher d'instructions de paiement."),
+      canEdit ? "" : h("p", {}, "Lecture seule : seul l'administrateur système peut modifier ces numéros."),
+      out, ...cards);
+  },
+
+  // Dossiers en révision : une personne décide (le créateur du dossier ne peut pas décider).
+  async reviews(me, notice) {
+    const { data, error } = await sb.from("loan_application")
+      .select("id, total_price, down_payment, financed_amount, duration_days, installment_frequency, created_at, created_by, customer(first_name, last_name, phone_number), inventory_item(brand, model)")
+      .eq("status", "pending_review").order("created_at", { ascending: true });
+    if (error) return message("error", error.message);
+
+    // Dernière décision automatique de chaque dossier (score, motifs). Facultatif : le dossier reste décidable sans.
+    const latest = new Map();
+    if ((data ?? []).length) {
+      const { data: decisions } = await sb.from("credit_decision")
+        .select("application_id, score, review_flags, hard_rule_failures, reason, created_at")
+        .in("application_id", data.map((a) => a.id)).order("created_at", { ascending: false });
+      for (const d of decisions ?? []) if (!latest.has(d.application_id)) latest.set(d.application_id, d);
+    }
+
+    const out = h("div");
+    if (notice) out.append(message("ok", notice));
+    const decide = async (a, approve, result) => {
+      const verb = approve ? "APPROUVER" : "REFUSER";
+      const reason = prompt(`Motif pour ${verb} ce dossier ?`);
+      if (!reason || !reason.trim()) return;
+      try {
+        await api("resolve_review", { p_application: a.id, p_approve: approve, p_reason: reason.trim() });
+        show(await views.reviews(me, approve ? "Dossier approuvé." : "Dossier refusé."));
+      } catch (err) { result.replaceChildren(message("error", friendlyError(err.message))); }
+    };
+
+    const cards = (data ?? []).map((a) => {
+      const d = latest.get(a.id);
+      const c = a.customer;
+      const result = h("div");
+      return h("div", { class: "pgroup" },
+        h("h3", {}, c ? `${c.first_name} ${c.last_name}` : "Client (non visible avec votre rôle)"),
+        h("p", {}, [
+          c?.phone_number ? `Téléphone : ${c.phone_number}` : "",
+          a.inventory_item ? ` — Appareil : ${a.inventory_item.brand} ${a.inventory_item.model}` : "",
+        ].join("")),
+        h("p", {}, `Prix : ${usd(a.total_price)} — Acompte : ${usd(a.down_payment)} — Financé : ${usd(a.financed_amount)} — Durée : ${a.duration_days} jours (paiement ${FREQUENCY_LABELS[a.installment_frequency] ?? a.installment_frequency})`),
+        d ? h("p", {}, `Score : ${d.score ?? "—"}/100. ${d.review_flags?.length ? `À vérifier : ${d.review_flags.join(", ")}. ` : ""}${d.hard_rule_failures?.length ? `Règles non respectées : ${d.hard_rule_failures.join(", ")}. ` : ""}${d.reason}`) : "",
+        a.created_by === me.id ? message("error", "Vous avez créé ce dossier : vous ne pouvez pas le décider.") : "",
+        h("p", {},
+          h("button", { class: "primary", onclick: () => decide(a, true, result) }, "Approuver"), " ",
+          h("button", { onclick: () => decide(a, false, result) }, "Refuser")),
+        result);
+    });
+
+    return h("div", { class: "card" }, h("h2", {}, "Dossiers à décider"),
+      h("p", {}, "Dossiers que le score automatique n'a pas pu trancher. Un motif est obligatoire."),
+      out, ...(cards.length ? cards : [h("p", {}, "Aucun dossier en attente de décision.")]));
+  },
+
+  // Paiements en espèces : la Finance confirme ce qu'un agent a encaissé (jamais l'agent lui-même).
+  async cash(me, notice) {
+    const { data, error } = await sb.from("payment")
+      .select("id, amount, created_at, collected_by, loan_contract(contract_number)")
+      .eq("payment_method", "cash").eq("status", "pending").order("created_at", { ascending: true });
+    if (error) return message("error", error.message);
+
+    const out = h("div");
+    if (notice) out.append(message("ok", notice));
+    const confirmPayment = async (r) => {
+      const number = r.loan_contract?.contract_number ?? "—";
+      if (!confirm(`Confirmer la réception de ${usd(r.amount)} pour le contrat ${number} ?`)) return;
+      try {
+        await api("confirm_cash_payment", { p_payment: r.id });
+        show(await views.cash(me, `Paiement de ${usd(r.amount)} confirmé (contrat ${number}).`));
+      } catch (err) { out.replaceChildren(message("error", friendlyError(err.message))); }
+    };
+
+    return h("div", { class: "card" }, h("h2", {}, "Espèces à confirmer"),
+      h("p", {}, "Paiements encaissés par les agents. La confirmation les écrit au grand livre et peut débloquer le téléphone."),
+      out,
+      table(data, [
+        { label: "Contrat", render: (r) => r.loan_contract?.contract_number ?? "—" },
+        { label: "Montant", render: (r) => usd(r.amount) },
+        { label: "Encaissé le", render: (r) => new Date(r.created_at).toLocaleString("fr-FR") },
+        { label: "Action", render: (r) => (r.collected_by === me.id
+          ? "Vous avez encaissé ce paiement"
+          : h("button", { class: "primary", onclick: () => confirmPayment(r) }, "Confirmer")) },
+      ]));
+  },
+
 };
 
 const MENU = [
   ["home", "Accueil"], ["simulator", "Simulateur"], ["policy", "Politique de crédit"],
   ["payment", "Paiement manuel"], ["applications", "Dossiers"], ["devices", "Appareils"], ["approvals", "Validations"],
+  ["reviews", "Dossiers à décider"], ["cash", "Espèces à confirmer"], ["merchants", "Numéros marchands"],
 ];
 
 let me = null;
