@@ -39,25 +39,188 @@ async function api(action, params = {}) {
   return body.data;
 }
 
-function table(rows, columns) {
-  if (!rows || rows.length === 0) return h("p", {}, "Aucune donnée.");
-  return h("table", {},
-    h("thead", {}, h("tr", {}, columns.map((c) => h("th", {}, c.label)))),
-    h("tbody", {}, rows.map((r) => h("tr", {}, columns.map((c) => h("td", {}, c.render ? c.render(r) : String(r[c.key] ?? "")))))),
+// ---------------------------------------------------------------- composants d'interface
+// Les icônes sont des constantes fixes ci-dessous (jamais du texte venant du serveur).
+const ICONS = {
+  home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/>',
+  calculator: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01M16 16h.01"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  review: '<rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1M9.5 13l2 2 3.5-4"/>',
+  sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+  shield: '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/>',
+  card: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h3"/>',
+  cash: '<rect x="2.5" y="6.5" width="19" height="11" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>',
+  store: '<path d="M4 9l1.5-5h13L20 9"/><path d="M4 9v10h16V9M4 9h16M9 19v-5h6v5"/>',
+  phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10.5 18h3"/>',
+  sim: '<path d="M7 3h7l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><rect x="9" y="12" width="6" height="6" rx="1"/>',
+  lock: '<rect x="5" y="11" width="14" height="9" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  box: '<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3.5 8L12 13l8.5-5M12 13v8"/>',
+  call: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/>',
+  percent: '<path d="M5 19L19 5"/><circle cx="7" cy="7" r="2"/><circle cx="17" cy="17" r="2"/>',
+  check: '<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',
+  alert: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>',
+  warn: '<path d="M12 3L2.5 20h19z"/><path d="M12 10v4M12 17h.01"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  inbox: '<path d="M3 13l3-8h12l3 8v6H3z"/><path d="M3 13h5l1 2h6l1-2h5"/>',
+};
+
+function icon(name) {
+  const doc = new DOMParser().parseFromString(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] ?? ""}</svg>`,
+    "image/svg+xml",
   );
+  return document.importNode(doc.documentElement, true);
 }
 
+function table(rows, columns, emptyText = "Aucune donnée.") {
+  if (!rows || rows.length === 0) return empty(emptyText);
+  return h("div", { class: "table-wrap" },
+    h("table", { class: "stack" },
+      h("thead", {}, h("tr", {}, columns.map((c) => h("th", { class: c.cls === "num" ? "num" : "" }, c.label)))),
+      h("tbody", {}, rows.map((r) => h("tr", {}, columns.map((c) => h("td", { "data-label": c.label, class: c.cls ?? "" }, c.render ? c.render(r) : String(r[c.key] ?? ""))))))));
+}
+
+function badge(label, tone = "neutral") {
+  return h("span", { class: `badge ${tone}` }, label);
+}
+
+const LOCK_STATES = { unlocked: ["Déverrouillé", "ok"], warning: ["Alerte", "warn"], locked: ["Verrouillé", "bad"], released: ["Libéré", "info"] };
 function pill(state) {
-  return h("span", { class: `pill ${state}` }, state);
+  const [label, tone] = LOCK_STATES[state] ?? [state, "neutral"];
+  return badge(label, tone);
+}
+
+const STATUSES = {
+  pending: ["En attente", "warn"], pending_review: ["À décider", "warn"], approved: ["Approuvé", "ok"], rejected: ["Refusé", "bad"],
+  active: ["Actif", "ok"], completed: ["Terminé", "info"], defaulted: ["En défaut", "bad"],
+  closed: ["Clôturé", "info"], breached: ["En défaut", "bad"], locked: ["Verrouillé", "bad"], suspended: ["Suspendu", "bad"],
+};
+function statusBadge(status) {
+  const [label, tone] = STATUSES[status] ?? [status ?? "—", "neutral"];
+  return badge(label, tone);
+}
+
+const ROLE_LABELS_ALL = {
+  client: "Client", field_agent: "Agent de terrain", distributor: "Distributeur", agency_supervisor: "Superviseur d'agence",
+  risk_analyst: "Analyste risque", collections: "Recouvrement", finance: "Finance", system_admin: "Administrateur système",
+};
+const roleLabel = (role) => ROLE_LABELS_ALL[role] ?? role ?? "—";
+const statusLabel = (status) => (STATUSES[status] ?? [status ?? "—"])[0];
+
+function empty(text = "Aucune donnée.", name = "inbox") {
+  return h("div", { class: "empty" }, icon(name), h("p", {}, text));
+}
+
+function loading(text = "Chargement…") {
+  return h("div", { class: "loading", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), text);
 }
 
 function show(el) {
   const view = $("#view");
   view.replaceChildren(el);
+  // Après une action, rend le message de confirmation visible même si la page était défilée.
+  view.querySelector(".alert.ok")?.scrollIntoView({ block: "nearest" });
 }
 
+// kind : "ok", "error", "warn" ou "info"
 function message(kind, text) {
-  return h("p", { class: kind }, text);
+  const iconName = { ok: "check", error: "alert", warn: "warn", info: "info" }[kind] ?? "info";
+  return h("div", { class: `alert ${kind}`, role: kind === "error" ? "alert" : "status" }, icon(iconName), h("span", {}, text));
+}
+
+// Page = titre + sous-titre, puis une carte qui contient le contenu.
+function page(title, lead, ...children) {
+  return h("div", { class: "page" },
+    h("div", { class: "page-head" }, h("h2", {}, title), lead ? h("p", { class: "lead" }, lead) : ""),
+    h("div", { class: "card" }, ...children));
+}
+
+// Liste "libellé / valeur" (remplace l'affichage JSON brut).
+const humanize = (k) => { const t = String(k).replace(/_/g, " "); return t.charAt(0).toUpperCase() + t.slice(1); };
+function formatValue(v) {
+  if (v === null || v === undefined || v === "") return "—";
+  if (typeof v === "boolean") return v ? "Oui" : "Non";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+const kvItem = (label, value) => h("div", {}, h("dt", {}, label), h("dd", {}, value instanceof Node ? value : formatValue(value)));
+const kvList = (items) => h("dl", { class: "kv" }, items.map(([label, value]) => kvItem(label, value)));
+const rawJson = (data) => h("details", { class: "raw" }, h("summary", {}, "Voir le détail technique (JSON)"), h("pre", {}, JSON.stringify(data, null, 2)));
+
+function resultBlock(title, data) {
+  const kids = [message("ok", title)];
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const flat = Object.entries(data).filter(([, v]) => v === null || typeof v !== "object");
+    if (flat.length) kids.push(kvList(flat.map(([k, v]) => [humanize(k), v])));
+  }
+  kids.push(rawJson(data));
+  return h("div", { class: "result" }, ...kids);
+}
+
+// Fenêtres de dialogue (remplacent prompt() et confirm()).
+// Résout avec les valeurs saisies ({ nom: valeur }), ou avec null si la personne annule.
+function dialogForm({ title, text, fields = [], confirmText = "Confirmer", danger = false }) {
+  return new Promise((resolve) => {
+    const controls = fields.map((f) => {
+      let el;
+      if (f.options) {
+        el = h("select", { name: f.name }, f.options.map(([v, l]) => h("option", { value: v }, l)));
+      } else {
+        const attrs = { name: f.name, ...(f.required === false ? {} : { required: "" }) };
+        if (f.placeholder) attrs.placeholder = f.placeholder;
+        if (f.textarea) attrs.rows = "3";
+        else { attrs.type = f.type ?? "text"; if (f.min !== undefined) attrs.min = String(f.min); if (f.step !== undefined) attrs.step = String(f.step); }
+        el = h(f.textarea ? "textarea" : "input", attrs);
+      }
+      if (f.value !== undefined) el.value = String(f.value);
+      return el;
+    });
+
+    let settled = false;
+    const dlg = h("dialog", { class: "modal", "aria-labelledby": "dialog-title" });
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      if (dlg.open) dlg.close();
+      dlg.remove();
+      resolve(value);
+    };
+
+    const form = h("form", {
+      onsubmit: (e) => {
+        e.preventDefault();
+        finish(Object.fromEntries(fields.map((f, i) => [f.name, controls[i].value.trim()])));
+      },
+    },
+      h("div", { class: "modal-body" },
+        h("h3", { id: "dialog-title" }, title),
+        text ? h("p", { class: "modal-text" }, text) : "",
+        ...fields.map((f, i) => h("label", {}, f.label, controls[i])),
+        h("div", { class: "modal-actions" },
+          h("button", { type: "button", onclick: () => finish(null) }, "Annuler"),
+          h("button", { type: "submit", class: `primary${danger ? " danger" : ""}` }, confirmText))));
+
+    dlg.append(form);
+    dlg.addEventListener("close", () => finish(null));               // touche Échap
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) finish(null); }); // clic sur le fond
+    document.body.append(dlg);
+    dlg.showModal();
+  });
+}
+
+// Demande un motif (obligatoire). Renvoie le texte, ou null si annulé.
+const askReason = (title, text, opts = {}) => dialogForm({
+  title, text, confirmText: opts.confirmText ?? "Valider", danger: opts.danger ?? false,
+  fields: [{ name: "reason", label: opts.label ?? "Motif", textarea: true, placeholder: opts.placeholder }],
+}).then((r) => (r && r.reason ? r.reason : null));
+
+const confirmDialog = (title, text, confirmText = "Confirmer") =>
+  dialogForm({ title, text, confirmText }).then((r) => r !== null);
+
+function setBusy(button, on) {
+  if (!button) return;
+  button.disabled = on;
+  if (on) button.setAttribute("aria-busy", "true"); else button.removeAttribute("aria-busy");
 }
 
 // ---------------------------------------------------------------- credit policy form
@@ -180,14 +343,86 @@ const usd = (n) => `${Number(n).toFixed(2)} USD`;
 const FREQUENCY_LABELS = { daily: "par jour", weekly: "par semaine", monthly: "par mois" };
 const PROVIDERS = [["mpesa", "M-Pesa"], ["airtel_money", "Airtel Money"], ["orange_money", "Orange Money"]];
 
+// ---------------------------------------------------------------- navigation (groupes du menu)
+const NAV_GROUPS = [
+  { title: null, items: [
+    { key: "home", label: "Accueil", icon: "home", desc: "" },
+  ] },
+  { title: "Dossiers de crédit", items: [
+    { key: "simulator", label: "Simulateur", icon: "calculator", desc: "Calculez une offre : acompte, durée, échéances." },
+    { key: "applications", label: "Dossiers", icon: "folder", desc: "Consultez les derniers dossiers de crédit." },
+    { key: "reviews", label: "Dossiers à décider", icon: "review", desc: "Décidez des dossiers que le score automatique n'a pas tranchés." },
+    { key: "policy", label: "Politique de crédit", icon: "sliders", desc: "Frais, intérêts, pénalités et seuils de score." },
+  ] },
+  { title: "Paiements", items: [
+    { key: "payment", label: "Paiement manuel", icon: "card", desc: "Enregistrez un paiement Mobile Money reçu." },
+    { key: "cash", label: "Espèces à confirmer", icon: "cash", desc: "Confirmez les espèces encaissées par les agents." },
+    { key: "merchants", label: "Numéros marchands", icon: "store", desc: "Numéros où les clients envoient leurs paiements." },
+  ] },
+  { title: "Appareils", items: [
+    { key: "devices", label: "Appareils", icon: "phone", desc: "Verrouillez, déverrouillez et suivez les appareils." },
+    { key: "sims", label: "SIM à valider", icon: "sim", desc: "Autorisez ou refusez les changements de carte SIM." },
+    { key: "devicepolicy", label: "Politique des appareils", icon: "lock", desc: "Règles de sécurité et fournisseur de verrouillage." },
+    { key: "stock", label: "Stock", icon: "box", desc: "Affectez les téléphones en stock aux agences." },
+  ] },
+  { title: "Recouvrement", items: [
+    { key: "collections", label: "Recouvrement", icon: "call", desc: "Tâches de relance et de visite : assignation et clôture." },
+    { key: "contracts", label: "Remises et restructuration", icon: "percent", desc: "Demandez une remise de pénalités ou une restructuration." },
+    { key: "approvals", label: "Validations", icon: "shield", desc: "Double validation des demandes sensibles." },
+  ] },
+];
+const NAV_ITEMS = NAV_GROUPS.flatMap((g) => g.items);
+const VIEW_LABELS = Object.fromEntries(NAV_ITEMS.map((i) => [i.key, i.label]));
+
+const FREQ_OPTIONS = [["daily", "Par jour"], ["weekly", "Par semaine"], ["monthly", "Par mois"]];
+const fmtDay = (s) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s ?? "")); return m ? `${m[3]}/${m[2]}/${m[1]}` : formatValue(s); };
+const money = (v) => (v === null || v === undefined ? "—" : usd(v));
+const fmtDate = (s) => (s ? new Date(s).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "—");
+
+// Résumé lisible d'une offre de crédit (réponse de simulate_loan).
+function offerView(o) {
+  const freq = FREQ_OPTIONS.find(([k]) => k === o.frequency)?.[1]?.toLowerCase() ?? o.frequency;
+  const stat = (label, value, sub) => h("div", { class: "stat" },
+    h("div", { class: "stat-label" }, label), h("div", { class: "stat-value" }, value), sub ? h("div", { class: "stat-sub" }, sub) : "");
+  const pen = o.penalty_terms;
+  const lock = o.lock_terms;
+  const warnings = (Array.isArray(o.warnings) ? o.warnings : []).map((w) => message("warn", typeof w === "string" ? w : JSON.stringify(w)));
+  return h("div", { class: "result" },
+    ...warnings,
+    h("div", { class: "stats" },
+      stat("Échéance", money(o.installment_amount), `${o.installment_count ?? "?"} échéance(s), ${freq}`),
+      stat("Total à rembourser", money(o.total_due), `dont intérêt ${money(o.interest_amount)}`),
+      stat("Montant financé", money(o.financed_amount), `après un acompte de ${money(o.down_payment)}`)),
+    kvList([
+      ["Prix du téléphone", money(o.retail_price)],
+      ["Acompte", money(o.down_payment)],
+      ["Acompte minimum", money(o.minimum_down_payment)],
+      ["Frais de dossier", money(o.processing_fee)],
+      ["Durée", o.duration_days === undefined ? "—" : `${o.duration_days} jours`],
+      ["Dernière échéance", money(o.last_installment_amount)],
+      ["Première échéance le", fmtDay(o.first_due_date)],
+      ["Fin du crédit le", fmtDay(o.end_date)],
+      ["Pénalité de retard", pen ? `${round(Number(pen.penalty_rate_per_day) * 100, 4)} % par jour, après ${pen.grace_days} jour(s) de grâce` : "—"],
+      ["Verrouillage du téléphone", lock ? `après ${lock.lock_after_days_overdue} jour(s) de retard` : "—"],
+    ]),
+    rawJson(o));
+}
+
 // ---------------------------------------------------------------- views
 const views = {
   async home(me) {
-    return h("div", { class: "card" },
-      h("h2", {}, "Accueil"),
-      h("p", {}, `Rôle : ${me.role} — statut : ${me.status}`),
-      h("p", {}, "Utilisez le menu pour tester chaque partie."),
-    );
+    const tile = (i) => h("a", { class: "tile", href: `#/${i.key}` },
+      h("span", { class: "tile-icon" }, icon(i.icon)),
+      h("span", {}, h("div", { class: "tile-title" }, i.label), h("div", { class: "tile-desc" }, i.desc)));
+    return h("div", { class: "page" },
+      h("section", { class: "hero" },
+        h("div", {}, h("h2", {}, "Bienvenue"), h("p", {}, "Choisissez une rubrique ci-dessous ou utilisez le menu pour naviguer.")),
+        h("div", { class: "hero-chips" },
+          h("span", { class: "chip" }, roleLabel(me.role)),
+          h("span", { class: "chip" }, `Statut : ${statusLabel(me.status)}`))),
+      ...NAV_GROUPS.filter((g) => g.title).map((g) => h("section", { class: "tile-group" },
+        h("h3", {}, g.title),
+        h("div", { class: "tiles" }, g.items.map(tile)))));
   },
 
   async simulator() {
@@ -208,18 +443,17 @@ const views = {
           p_frequency: f.get("frequency"),
         });
         if (error) return out.append(message("error", error.message));
-        out.append(h("pre", {}, JSON.stringify(data, null, 2)));
+        out.append(offerView(data));
       },
     },
-      h("label", {}, "Téléphone",
-        h("select", { name: "item" }, items.map((i) => h("option", { value: i.id }, `${i.brand} ${i.model} — ${i.retail_price} USD`)))),
-      h("label", {}, "Acompte (USD)", h("input", { name: "down", type: "number", step: "0.01", required: "" })),
-      h("label", {}, "Durée (jours)", h("select", { name: "duration" }, [30, 60, 90, 120, 180].map((d) => h("option", { value: d }, d)))),
-      h("label", {}, "Fréquence", h("select", { name: "frequency" }, ["daily", "weekly", "monthly"].map((x) => h("option", { value: x }, x)))),
-      h("button", { type: "submit" }, "Simuler"),
-    );
-    return h("div", { class: "card" }, h("h2", {}, "Simulateur de crédit"),
-      h("p", {}, "Réservé aux agents de terrain de l'agence (règle de l'étape 2)."), form, out);
+      h("div", { class: "form-grid" },
+        h("label", {}, "Téléphone", h("select", { name: "item" }, items.map((i) => h("option", { value: i.id }, `${i.brand} ${i.model} — ${i.retail_price} USD`)))),
+        h("label", {}, "Acompte (USD)", h("input", { name: "down", type: "number", step: "0.01", required: "", placeholder: "0.00" })),
+        h("label", {}, "Durée (jours)", h("select", { name: "duration" }, [30, 60, 90, 120, 180].map((d) => h("option", { value: d }, `${d} jours`)))),
+        h("label", {}, "Fréquence de paiement", h("select", { name: "frequency" }, FREQ_OPTIONS.map(([v, l]) => h("option", { value: v }, l))))),
+      h("button", { type: "submit" }, "Simuler"));
+    return page("Simulateur de crédit", "Réservé aux agents de terrain de l'agence (règle de l'étape 2).",
+      (items ?? []).length ? form : empty("Aucun téléphone en stock à simuler."), out);
   },
 
   async policy(me, notice) {
@@ -248,12 +482,10 @@ const views = {
     const out = h("div");
     if (notice) out.append(message("ok", notice));
 
-    const box = h("div", { class: "card" }, h("h2", {}, "Politique de crédit"),
-      h("p", {}, canEdit
-        ? "Les règles appliquées à tous les nouveaux dossiers. Les contrats déjà signés ne changent pas."
-        : "Les règles appliquées à tous les nouveaux dossiers (lecture seule : seul l'administrateur système peut les modifier)."));
-
-    if (!canEdit) { box.append(...groups); return box; }
+    const lead = "Les règles appliquées à tous les nouveaux dossiers." + (canEdit ? " Les contrats déjà signés ne changent pas." : "");
+    if (!canEdit) {
+      return page("Politique de crédit", lead, message("info", "Lecture seule : seul l'administrateur système peut modifier ces règles."), ...groups);
+    }
 
     const reason = h("input", { name: "reason", required: "", placeholder: "Ex. : ajustement de l'intérêt" });
     const form = h("form", {
@@ -273,11 +505,10 @@ const views = {
       },
     },
       ...groups,
-      h("label", {}, h("strong", {}, "Motif du changement"), reason),
-      h("button", { type: "submit" }, "Enregistrer"),
-    );
-    box.append(form, out);
-    return box;
+      h("div", { class: "savebar" },
+        h("label", {}, "Motif du changement", reason),
+        h("button", { type: "submit" }, "Enregistrer")));
+    return page("Politique de crédit", lead, out, form);
   },
 
   async payment() {
@@ -295,19 +526,19 @@ const views = {
             p_method: f.get("method"),
             p_note: f.get("note") || null,
           });
-          out.append(h("pre", {}, JSON.stringify(res, null, 2)));
+          out.append(resultBlock("Opération réussie.", res));
         } catch (err) { out.append(message("error", err.message)); }
       },
     },
-      h("label", {}, "Opérateur", h("select", { name: "method" }, ["mpesa", "airtel_money", "orange_money"].map((x) => h("option", { value: x }, x)))),
-      h("label", {}, "Référence de transaction opérateur", h("input", { name: "ref", required: "" })),
-      h("label", {}, "Numéro de contrat", h("input", { name: "contract", required: "" })),
-      h("label", {}, "Montant (USD)", h("input", { name: "amount", type: "number", step: "0.01", required: "" })),
-      h("label", {}, "Note", h("input", { name: "note" })),
-      h("button", { type: "submit" }, "Valider le paiement"),
-    );
-    return h("div", { class: "card" }, h("h2", {}, "Paiement Mobile Money (saisie manuelle)"),
-      h("p", {}, "Réservé à la Finance et aux superviseurs. La validation écrit au grand livre et peut débloquer le téléphone."),
+      h("div", { class: "form-grid" },
+        h("label", {}, "Opérateur", h("select", { name: "method" }, PROVIDERS.map(([v, l]) => h("option", { value: v }, l)))),
+        h("label", {}, "Référence de transaction opérateur", h("input", { name: "ref", required: "" })),
+        h("label", {}, "Numéro de contrat", h("input", { name: "contract", required: "", placeholder: "CT-2026-000123" })),
+        h("label", {}, "Montant (USD)", h("input", { name: "amount", type: "number", step: "0.01", required: "", placeholder: "0.00" })),
+        h("label", {}, "Note (facultatif)", h("input", { name: "note" }))),
+      h("button", { type: "submit" }, "Valider le paiement"));
+    return page("Paiement Mobile Money (saisie manuelle)",
+      "Réservé à la Finance et aux superviseurs. La validation écrit au grand livre et peut débloquer le téléphone.",
       form, out);
   },
 
@@ -316,11 +547,14 @@ const views = {
       .select("id, status, total_price, down_payment, financed_amount, duration_days, created_at")
       .order("created_at", { ascending: false }).limit(50);
     if (error) return message("error", error.message);
-    return h("div", { class: "card" }, h("h2", {}, "Dossiers"), table(data, [
-      { label: "Statut", key: "status" }, { label: "Prix (USD)", key: "total_price" },
-      { label: "Acompte", key: "down_payment" }, { label: "Financé", key: "financed_amount" },
-      { label: "Durée", key: "duration_days" }, { label: "Créé", render: (r) => new Date(r.created_at).toLocaleString("fr-FR") },
-    ]));
+    return page("Dossiers", "Les 50 derniers dossiers de crédit.", table(data, [
+      { label: "Statut", render: (r) => statusBadge(r.status) },
+      { label: "Prix (USD)", key: "total_price", cls: "num" },
+      { label: "Acompte", key: "down_payment", cls: "num" },
+      { label: "Financé", key: "financed_amount", cls: "num" },
+      { label: "Durée (jours)", key: "duration_days", cls: "num" },
+      { label: "Créé", render: (r) => fmtDate(r.created_at) },
+    ], "Aucun dossier pour le moment."));
   },
 
   // Appareils : verrouillage / déverrouillage manuel et levée du blocage sécurité.
@@ -336,39 +570,45 @@ const views = {
       try { await call(); show(await views.devices(me, okText)); }
       catch (err) { out.replaceChildren(message("error", friendlyError(err.message))); }
     };
-    const ask = (question) => { const t = prompt(question); return t && t.trim() ? t.trim() : null; };
 
-    const lock = (d) => {
-      const reason = ask(`Motif du verrouillage de l'appareil ${d.imei} ?`);
+    const lock = async (d) => {
+      const reason = await askReason("Verrouiller l'appareil", `IMEI ${d.imei}. Indiquez le motif du verrouillage.`, { confirmText: "Verrouiller", danger: true });
       if (reason) run(() => api("manual_lock_device", { p_device: d.id, p_reason: reason }), `Appareil ${d.imei} : verrouillage demandé.`);
     };
-    const unlock = (d) => {
-      const hours = Number(prompt("Pendant combien d'heures déverrouiller ? (entier, selon la politique des appareils)", "24"));
+    const unlock = async (d) => {
+      const r = await dialogForm({
+        title: "Déverrouiller l'appareil", text: `IMEI ${d.imei}. Durée en heures (nombre entier), selon la politique des appareils.`, confirmText: "Déverrouiller",
+        fields: [
+          { name: "hours", label: "Durée du déverrouillage (heures)", type: "number", min: 1, step: 1, value: 24 },
+          { name: "reason", label: "Motif", textarea: true },
+        ],
+      });
+      if (!r) return;
+      const hours = Number(r.hours);
       if (!Number.isInteger(hours) || hours < 1) { out.replaceChildren(message("error", "Durée invalide : entrez un nombre entier d'heures.")); return; }
-      const reason = ask(`Motif du déverrouillage de l'appareil ${d.imei} ?`);
-      if (reason) run(() => api("manual_unlock_device", { p_device: d.id, p_hours: hours, p_reason: reason }), `Appareil ${d.imei} : déverrouillé pour ${hours} h.`);
+      if (r.reason) run(() => api("manual_unlock_device", { p_device: d.id, p_hours: hours, p_reason: r.reason }), `Appareil ${d.imei} : déverrouillé pour ${hours} h.`);
     };
-    const clearHold = (d) => {
-      const reason = ask(`Motif pour lever le blocage sécurité de ${d.imei} ?`);
+    const clearHold = async (d) => {
+      const reason = await askReason("Lever le blocage sécurité", `IMEI ${d.imei}. Indiquez le motif.`);
       if (reason) run(() => api("clear_security_hold", { p_device: d.id, p_reason: reason }), `Appareil ${d.imei} : blocage sécurité levé.`);
     };
 
-    return h("div", { class: "card" }, h("h2", {}, "Appareils gérés"), out, table(data, [
-      { label: "IMEI", key: "imei" },
+    return page("Appareils gérés", "Les 50 derniers appareils : état de verrouillage et actions manuelles.", out, table(data, [
+      { label: "IMEI", key: "imei", cls: "mono" },
       { label: "État", render: (r) => pill(r.lock_state) },
-      { label: "Raison", key: "lock_reason" },
-      { label: "Fournisseur", key: "lock_provider" },
-      { label: "Blocage sécurité", render: (r) => (r.security_hold ? "oui" : "non") },
-      { label: "Dernière activité", render: (r) => (r.last_seen_at ? new Date(r.last_seen_at).toLocaleString("fr-FR") : "—") },
-      { label: "Actions", render: (r) => {
+      { label: "Raison", render: (r) => r.lock_reason ?? "—", cls: "wrap-text" },
+      { label: "Fournisseur", render: (r) => r.lock_provider ?? "—" },
+      { label: "Blocage sécurité", render: (r) => (r.security_hold ? badge("Oui", "bad") : badge("Non")) },
+      { label: "Dernière activité", render: (r) => fmtDate(r.last_seen_at) },
+      { label: "Actions", cls: "actions-cell", render: (r) => {
         if (r.lock_state === "released") return "Libéré";
         const buttons = [];
-        if (r.lock_state !== "locked") buttons.push(h("button", { onclick: () => lock(r) }, "Verrouiller"));
+        if (r.lock_state !== "locked") buttons.push(h("button", { class: "danger", onclick: () => lock(r) }, "Verrouiller"));
         if (r.lock_state === "locked") buttons.push(h("button", { class: "primary", onclick: () => unlock(r) }, "Déverrouiller"));
         if (r.security_hold) buttons.push(h("button", { onclick: () => clearHold(r) }, "Lever le blocage"));
-        return h("span", {}, ...buttons.flatMap((b) => [b, " "]));
+        return h("div", { class: "actions" }, ...buttons);
       } },
-    ]));
+    ], "Aucun appareil géré pour le moment."));
   },
 
   // Changements de SIM en attente : autoriser ou refuser.
@@ -381,25 +621,27 @@ const views = {
     const out = h("div");
     if (notice) out.append(message("ok", notice));
     const decide = async (r, approve) => {
-      const reason = prompt(`Motif pour ${approve ? "AUTORISER" : "REFUSER"} cette SIM ?`);
-      if (!reason || !reason.trim()) return;
+      const reason = await askReason(approve ? "Autoriser cette SIM" : "Refuser cette SIM",
+        `Appareil ${r.managed_device?.imei ?? "—"}. Indiquez le motif de la décision.`,
+        { confirmText: approve ? "Autoriser" : "Refuser", danger: !approve });
+      if (!reason) return;
       try {
-        await api("resolve_sim_change", { p_device: r.managed_device_id, p_sim_hash: r.sim_hash, p_approve: approve, p_reason: reason.trim() });
+        await api("resolve_sim_change", { p_device: r.managed_device_id, p_sim_hash: r.sim_hash, p_approve: approve, p_reason: reason });
         show(await views.sims(me, approve ? "SIM autorisée." : "SIM refusée."));
       } catch (err) { out.replaceChildren(message("error", friendlyError(err.message))); }
     };
 
-    return h("div", { class: "card" }, h("h2", {}, "SIM à valider"),
-      h("p", {}, "Une nouvelle carte SIM a été détectée dans ces appareils. Tant qu'elle n'est pas autorisée, la politique de l'appareil peut le verrouiller."),
+    return page("SIM à valider",
+      "Une nouvelle carte SIM a été détectée dans ces appareils. Tant qu'elle n'est pas autorisée, la politique de l'appareil peut le verrouiller.",
       out,
       table(data, [
-        { label: "Appareil (IMEI)", render: (r) => r.managed_device?.imei ?? "—" },
-        { label: "Empreinte SIM", render: (r) => `${r.sim_hash.slice(0, 12)}…` },
-        { label: "Détectée le", render: (r) => new Date(r.first_seen_at).toLocaleString("fr-FR") },
-        { label: "Décision", render: (r) => h("span", {},
-          h("button", { class: "primary", onclick: () => decide(r, true) }, "Autoriser"), " ",
-          h("button", { onclick: () => decide(r, false) }, "Refuser")) },
-      ]));
+        { label: "Appareil (IMEI)", render: (r) => r.managed_device?.imei ?? "—", cls: "mono" },
+        { label: "Empreinte SIM", render: (r) => `${r.sim_hash.slice(0, 12)}…`, cls: "mono" },
+        { label: "Détectée le", render: (r) => fmtDate(r.first_seen_at) },
+        { label: "Décision", cls: "actions-cell", render: (r) => h("div", { class: "actions" },
+          h("button", { class: "primary", onclick: () => decide(r, true) }, "Autoriser"),
+          h("button", { class: "danger", onclick: () => decide(r, false) }, "Refuser")) },
+      ], "Aucune SIM en attente de validation."));
   },
 
   // Politique des appareils et fournisseur de verrouillage par marque (administrateur système).
@@ -425,7 +667,7 @@ const views = {
 
     const out = h("div");
     if (notice) out.append(message("ok", notice));
-    const boolInputs = BOOLS.map(([k]) => h("input", { type: "checkbox", ...(pol[k] ? { checked: "" } : {}), ...lock }));
+    const boolInputs = BOOLS.map(([k]) => h("input", { type: "checkbox", class: "switch", ...(pol[k] ? { checked: "" } : {}), ...lock }));
     const numInputs = NUMS.map(([k]) => h("input", { type: "number", step: "1", value: String(pol[k]), ...lock }));
     const reasonInput = h("input", { placeholder: "Motif du changement", ...lock });
 
@@ -449,8 +691,8 @@ const views = {
         } catch (err) { out.append(message("error", friendlyError(err.message))); }
       },
     },
-      ...BOOLS.map(([, label], i) => h("label", {}, boolInputs[i], label)),
-      ...NUMS.map(([, label], i) => h("label", {}, label, numInputs[i])),
+      h("div", { class: "checks" }, BOOLS.map(([, label], i) => h("label", { class: "check" }, boolInputs[i], h("span", {}, label)))),
+      h("div", { class: "form-grid" }, NUMS.map(([, label], i) => h("label", {}, label, numInputs[i]))),
       h("label", {}, "Motif", reasonInput),
       canEdit ? h("button", { type: "submit", class: "primary" }, "Enregistrer") : "");
 
@@ -470,14 +712,14 @@ const views = {
           show(await views.devicepolicy(me, "Fournisseur de verrouillage enregistré."));
         } catch (err) { brandResult.append(message("error", friendlyError(err.message))); }
       },
-    }, h("label", {}, "Marque", brandInput), h("label", {}, "Fournisseur", providerSelect),
+    }, h("div", { class: "form-grid" }, h("label", {}, "Marque", brandInput), h("label", {}, "Fournisseur", providerSelect)),
       canEdit ? h("button", { type: "submit" }, "Enregistrer") : "", brandResult);
 
-    return h("div", { class: "card" }, h("h2", {}, "Politique des appareils"),
-      canEdit ? "" : h("p", {}, "Lecture seule : seul l'administrateur système peut modifier ces réglages."),
+    return page("Politique des appareils", "Règles de sécurité imposées aux téléphones et fournisseur de verrouillage par marque.",
+      canEdit ? "" : message("info", "Lecture seule : seul l'administrateur système peut modifier ces réglages."),
       out, policyForm,
       h("h3", {}, "Fournisseur de verrouillage par marque"),
-      table(brands ?? [], [{ label: "Marque", key: "brand" }, { label: "Fournisseur", render: (r) => PROVIDER_LABELS[r.provider] ?? r.provider }]),
+      table(brands ?? [], [{ label: "Marque", key: "brand" }, { label: "Fournisseur", render: (r) => PROVIDER_LABELS[r.provider] ?? r.provider }], "Aucun fournisseur défini."),
       brandForm);
   },
 
@@ -488,22 +730,26 @@ const views = {
     if (error) return message("error", error.message);
     const out = h("div");
     const decide = async (id, approve) => {
-      const reason = prompt("Motif de la décision ?");
+      const reason = await askReason(approve ? "Approuver cette demande" : "Rejeter cette demande", "Indiquez le motif de la décision.",
+        { confirmText: approve ? "Approuver" : "Rejeter", danger: !approve });
       if (!reason) return;
       try {
         const res = await api("decide_approval", { p_request: id, p_approve: approve, p_reason: reason });
-        out.replaceChildren(message("ok", "Décision enregistrée."), h("pre", {}, JSON.stringify(res, null, 2)));
+        out.replaceChildren(resultBlock("Décision enregistrée.", res));
       } catch (err) { out.replaceChildren(message("error", err.message)); }
     };
-    return h("div", { class: "card" }, h("h2", {}, "Demandes à valider (double validation)"),
+    return page("Demandes à valider (double validation)", "Les remises de pénalités et restructurations demandées attendent ici une seconde décision.",
+      out,
       table(data, [
-        { label: "Type", key: "kind" }, { label: "Détail", render: (r) => JSON.stringify(r.payload) },
-        { label: "Motif", key: "reason" },
-        { label: "Actions", render: (r) => h("span", {},
-          h("button", { class: "primary", onclick: () => decide(r.id, true) }, "Approuver"), " ",
-          h("button", { onclick: () => decide(r.id, false) }, "Rejeter")) },
-      ]), out);
+        { label: "Type", key: "kind" },
+        { label: "Détail", render: (r) => JSON.stringify(r.payload), cls: "mono wrap-text" },
+        { label: "Motif", key: "reason", cls: "wrap-text" },
+        { label: "Actions", cls: "actions-cell", render: (r) => h("div", { class: "actions" },
+          h("button", { class: "primary", onclick: () => decide(r.id, true) }, "Approuver"),
+          h("button", { class: "danger", onclick: () => decide(r.id, false) }, "Rejeter")) },
+      ], "Aucune demande en attente de validation."));
   },
+
   // Numéros marchands : où le client envoie son paiement Mobile Money (réservé à l'administrateur système).
   async merchants(me, notice) {
     const { data, error } = await sb.from("merchant_account").select("provider, merchant_number, display_name, active");
@@ -518,7 +764,7 @@ const views = {
       const lock = canEdit ? {} : { disabled: "" };
       const number = h("input", { value: cur?.merchant_number ?? "", placeholder: "+243…", maxlength: "30", ...lock });
       const name = h("input", { value: cur?.display_name ?? `CTM ${label}`, maxlength: "100", ...lock });
-      const active = h("input", { type: "checkbox", ...((cur?.active ?? true) ? { checked: "" } : {}), ...lock });
+      const active = h("input", { type: "checkbox", class: "switch", ...((cur?.active ?? true) ? { checked: "" } : {}), ...lock });
       const result = h("div");
       const form = h("form", {
         onsubmit: async (e) => {
@@ -533,20 +779,20 @@ const views = {
           } catch (err) { result.append(message("error", friendlyError(err.message))); }
         },
       },
-        h("label", {}, "Numéro marchand", number),
-        h("label", {}, "Nom affiché au client", name),
-        h("label", {}, active, "Actif (visible dans l'application client)"),
-        canEdit ? h("button", { type: "submit" }, "Enregistrer") : "",
+        h("div", { class: "form-grid" },
+          h("label", {}, "Numéro marchand", number),
+          h("label", {}, "Nom affiché au client", name)),
+        h("label", { class: "check" }, active, h("span", {}, "Actif (visible dans l'application client)")),
+        canEdit ? h("div", { class: "form-actions" }, h("button", { type: "submit" }, "Enregistrer")) : "",
         result,
       );
       return h("div", { class: "pgroup" }, h("h3", {}, label), form);
     });
 
     const hasActive = (data ?? []).some((r) => r.active && r.merchant_number);
-    return h("div", { class: "card" }, h("h2", {}, "Numéros marchands (Mobile Money)"),
-      h("p", {}, "Le client paie vers ces numéros en indiquant son numéro de contrat comme référence."),
-      hasActive ? "" : message("error", "Aucun numéro actif : l'application client ne pourra pas afficher d'instructions de paiement."),
-      canEdit ? "" : h("p", {}, "Lecture seule : seul l'administrateur système peut modifier ces numéros."),
+    return page("Numéros marchands (Mobile Money)", "Le client paie vers ces numéros en indiquant son numéro de contrat comme référence.",
+      hasActive ? "" : message("warn", "Aucun numéro actif : l'application client ne pourra pas afficher d'instructions de paiement."),
+      canEdit ? "" : message("info", "Lecture seule : seul l'administrateur système peut modifier ces numéros."),
       out, ...cards);
   },
 
@@ -569,11 +815,11 @@ const views = {
     const out = h("div");
     if (notice) out.append(message("ok", notice));
     const decide = async (a, approve, result) => {
-      const verb = approve ? "APPROUVER" : "REFUSER";
-      const reason = prompt(`Motif pour ${verb} ce dossier ?`);
-      if (!reason || !reason.trim()) return;
+      const reason = await askReason(approve ? "Approuver ce dossier" : "Refuser ce dossier", "Un motif est obligatoire.",
+        { confirmText: approve ? "Approuver" : "Refuser", danger: !approve });
+      if (!reason) return;
       try {
-        await api("resolve_review", { p_application: a.id, p_approve: approve, p_reason: reason.trim() });
+        await api("resolve_review", { p_application: a.id, p_approve: approve, p_reason: reason });
         show(await views.reviews(me, approve ? "Dossier approuvé." : "Dossier refusé."));
       } catch (err) { result.replaceChildren(message("error", friendlyError(err.message))); }
     };
@@ -582,24 +828,32 @@ const views = {
       const d = latest.get(a.id);
       const c = a.customer;
       const result = h("div");
-      return h("div", { class: "pgroup" },
-        h("h3", {}, c ? `${c.first_name} ${c.last_name}` : "Client (non visible avec votre rôle)"),
-        h("p", {}, [
-          c?.phone_number ? `Téléphone : ${c.phone_number}` : "",
-          a.inventory_item ? ` — Appareil : ${a.inventory_item.brand} ${a.inventory_item.model}` : "",
-        ].join("")),
-        h("p", {}, `Prix : ${usd(a.total_price)} — Acompte : ${usd(a.down_payment)} — Financé : ${usd(a.financed_amount)} — Durée : ${a.duration_days} jours (paiement ${FREQUENCY_LABELS[a.installment_frequency] ?? a.installment_frequency})`),
-        d ? h("p", {}, `Score : ${d.score ?? "—"}/100. ${d.review_flags?.length ? `À vérifier : ${d.review_flags.join(", ")}. ` : ""}${d.hard_rule_failures?.length ? `Règles non respectées : ${d.hard_rule_failures.join(", ")}. ` : ""}${d.reason}`) : "",
-        a.created_by === me.id ? message("error", "Vous avez créé ce dossier : vous ne pouvez pas le décider.") : "",
-        h("p", {},
-          h("button", { class: "primary", onclick: () => decide(a, true, result) }, "Approuver"), " ",
-          h("button", { onclick: () => decide(a, false, result) }, "Refuser")),
+      const own = a.created_by === me.id;
+      const meta = [
+        c?.phone_number ? `Téléphone : ${c.phone_number}` : "",
+        a.inventory_item ? `Appareil : ${a.inventory_item.brand} ${a.inventory_item.model}` : "",
+      ].filter(Boolean).join(" — ");
+      return h("div", { class: "pgroup case" },
+        h("div", { class: "case-head" },
+          h("h3", {}, c ? `${c.first_name} ${c.last_name}` : "Client (non visible avec votre rôle)"),
+          d ? badge(`Score ${d.score ?? "—"}/100`, "warn") : ""),
+        meta ? h("p", { class: "case-meta" }, meta) : "",
+        kvList([
+          ["Prix", usd(a.total_price)], ["Acompte", usd(a.down_payment)], ["Financé", usd(a.financed_amount)],
+          ["Durée", `${a.duration_days} jours`], ["Paiement", FREQUENCY_LABELS[a.installment_frequency] ?? a.installment_frequency],
+        ]),
+        d?.review_flags?.length ? message("warn", `À vérifier : ${d.review_flags.join(", ")}`) : "",
+        d?.hard_rule_failures?.length ? message("error", `Règles non respectées : ${d.hard_rule_failures.join(", ")}`) : "",
+        d?.reason ? h("p", { class: "note" }, d.reason) : "",
+        own ? message("warn", "Vous avez créé ce dossier : vous ne pouvez pas le décider.") : "",
+        h("div", { class: "actions" },
+          h("button", { class: "primary", ...(own ? { disabled: "" } : {}), onclick: () => decide(a, true, result) }, "Approuver"),
+          h("button", { class: "danger", ...(own ? { disabled: "" } : {}), onclick: () => decide(a, false, result) }, "Refuser")),
         result);
     });
 
-    return h("div", { class: "card" }, h("h2", {}, "Dossiers à décider"),
-      h("p", {}, "Dossiers que le score automatique n'a pas pu trancher. Un motif est obligatoire."),
-      out, ...(cards.length ? cards : [h("p", {}, "Aucun dossier en attente de décision.")]));
+    return page("Dossiers à décider", "Dossiers que le score automatique n'a pas pu trancher. Un motif est obligatoire.",
+      out, ...(cards.length ? cards : [empty("Aucun dossier en attente de décision.", "check")]));
   },
 
   // Paiements en espèces : la Finance confirme ce qu'un agent a encaissé (jamais l'agent lui-même).
@@ -613,24 +867,23 @@ const views = {
     if (notice) out.append(message("ok", notice));
     const confirmPayment = async (r) => {
       const number = r.loan_contract?.contract_number ?? "—";
-      if (!confirm(`Confirmer la réception de ${usd(r.amount)} pour le contrat ${number} ?`)) return;
+      if (!(await confirmDialog(`Confirmer la réception de ${usd(r.amount)} ?`, `Contrat ${number}. Le paiement sera écrit au grand livre.`, "Confirmer la réception"))) return;
       try {
         await api("confirm_cash_payment", { p_payment: r.id });
         show(await views.cash(me, `Paiement de ${usd(r.amount)} confirmé (contrat ${number}).`));
       } catch (err) { out.replaceChildren(message("error", friendlyError(err.message))); }
     };
 
-    return h("div", { class: "card" }, h("h2", {}, "Espèces à confirmer"),
-      h("p", {}, "Paiements encaissés par les agents. La confirmation les écrit au grand livre et peut débloquer le téléphone."),
+    return page("Espèces à confirmer", "Paiements encaissés par les agents. La confirmation les écrit au grand livre et peut débloquer le téléphone.",
       out,
       table(data, [
-        { label: "Contrat", render: (r) => r.loan_contract?.contract_number ?? "—" },
-        { label: "Montant", render: (r) => usd(r.amount) },
-        { label: "Encaissé le", render: (r) => new Date(r.created_at).toLocaleString("fr-FR") },
-        { label: "Action", render: (r) => (r.collected_by === me.id
-          ? "Vous avez encaissé ce paiement"
-          : h("button", { class: "primary", onclick: () => confirmPayment(r) }, "Confirmer")) },
-      ]));
+        { label: "Contrat", render: (r) => r.loan_contract?.contract_number ?? "—", cls: "mono" },
+        { label: "Montant", render: (r) => usd(r.amount), cls: "num" },
+        { label: "Encaissé le", render: (r) => fmtDate(r.created_at) },
+        { label: "Action", cls: "actions-cell", render: (r) => (r.collected_by === me.id
+          ? h("span", { class: "note" }, "Vous avez encaissé ce paiement")
+          : h("div", { class: "actions" }, h("button", { class: "primary", onclick: () => confirmPayment(r) }, "Confirmer"))) },
+      ], "Aucun paiement en espèces à confirmer."));
   },
 
   // Recouvrement : tâches ouvertes (relance ou visite), assignation et clôture avec résultat.
@@ -652,34 +905,45 @@ const views = {
       try { await call(); show(await views.collections(me, okText)); }
       catch (err) { out.replaceChildren(message("error", friendlyError(err.message))); }
     };
-    const complete = (t) => {
-      const outcome = prompt("Résultat du contact ou de la visite ?");
-      if (outcome && outcome.trim()) run(() => api("complete_collection_task", { p_task: t.id, p_outcome: outcome.trim() }), "Tâche clôturée.");
+    const complete = async (t) => {
+      const r = await dialogForm({
+        title: "Clôturer la tâche", text: `Contrat ${t.loan_contract?.contract_number ?? "—"}.`, confirmText: "Clôturer",
+        fields: [{ name: "outcome", label: "Résultat du contact ou de la visite", textarea: true }],
+      });
+      if (r && r.outcome) run(() => api("complete_collection_task", { p_task: t.id, p_outcome: r.outcome }), "Tâche clôturée.");
     };
 
-    const assignCell = (t) => {
-      if (!(people ?? []).length) return "Agents non visibles avec votre rôle";
-      const who = h("select", {}, ...people.map((p) => h("option", { value: p.id }, `${ROLE_LABELS[p.role] ?? p.role}${p.zone ? ` — ${p.zone}` : ""} (${p.id.slice(0, 8)})`)));
-      const type = h("select", {}, h("option", { value: "followup" }, "Relance"), h("option", { value: "field_visit" }, "Visite terrain"));
-      if (t.task_type) type.value = t.task_type;
-      return h("span", {}, who, " ", type, " ",
-        h("button", { onclick: () => run(() => api("assign_collection_task", { p_task: t.id, p_assignee: who.value, p_task_type: type.value }), "Tâche assignée.") }, "Assigner"));
+    const assign = async (t) => {
+      const r = await dialogForm({
+        title: "Assigner la tâche", text: `Contrat ${t.loan_contract?.contract_number ?? "—"}.`, confirmText: "Assigner",
+        fields: [
+          { name: "assignee", label: "Agent", options: (people ?? []).map((p) => [p.id, `${ROLE_LABELS[p.role] ?? p.role}${p.zone ? ` — ${p.zone}` : ""} (${p.id.slice(0, 8)})`]) },
+          { name: "type", label: "Type de tâche", options: [["followup", "Relance"], ["field_visit", "Visite terrain"]], value: t.task_type || "followup" },
+        ],
+      });
+      if (r) run(() => api("assign_collection_task", { p_task: t.id, p_assignee: r.assignee, p_task_type: r.type }), "Tâche assignée.");
     };
 
-    return h("div", { class: "card" }, h("h2", {}, "Recouvrement"),
-      h("p", {}, "Une seule tâche ouverte par contrat. Les tâches urgentes sont en premier."),
+    const actionsCell = (t) => {
+      const kids = [];
+      if ((people ?? []).length) kids.push(h("button", { onclick: () => assign(t) }, t.assigned_to ? "Réassigner" : "Assigner"));
+      else kids.push(h("span", { class: "note" }, "Agents non visibles avec votre rôle"));
+      kids.push(h("button", { class: "primary", onclick: () => complete(t) }, "Clôturer"));
+      return h("div", { class: "actions" }, ...kids);
+    };
+
+    return page("Recouvrement", "Une seule tâche ouverte par contrat. Les tâches urgentes sont en premier.",
       out,
       table(tasks, [
-        { label: "Contrat", render: (r) => r.loan_contract?.contract_number ?? "—" },
-        { label: "Client", render: (r) => (r.customer ? `${r.customer.first_name} ${r.customer.last_name} — ${r.customer.phone_number}` : "—") },
+        { label: "Contrat", render: (r) => r.loan_contract?.contract_number ?? "—", cls: "mono" },
+        { label: "Client", render: (r) => (r.customer ? h("div", {}, h("div", {}, `${r.customer.first_name} ${r.customer.last_name}`), h("div", { class: "note nowrap" }, r.customer.phone_number ?? "")) : "—") },
         { label: "Type", render: (r) => (r.task_type === "field_visit" ? "Visite terrain" : "Relance") },
-        { label: "Priorité", render: (r) => (r.priority === "high" ? "Urgente" : "Normale") },
-        { label: "Motif", key: "reason" },
-        { label: "Échéance", key: "due_date" },
-        { label: "État", render: (r) => (r.assigned_to ? "Assignée" : "À assigner") },
-        { label: "Assigner", render: assignCell },
-        { label: "Clôturer", render: (r) => h("button", { onclick: () => complete(r) }, "Clôturer") },
-      ]));
+        { label: "Priorité", render: (r) => (r.priority === "high" ? badge("Urgente", "bad") : badge("Normale")) },
+        { label: "Motif", key: "reason", cls: "wrap-text" },
+        { label: "Échéance", render: (r) => fmtDay(r.due_date), cls: "nowrap" },
+        { label: "État", render: (r) => (r.assigned_to ? badge("Assignée", "ok") : badge("À assigner", "warn")) },
+        { label: "Actions", cls: "actions-cell", render: actionsCell },
+      ], "Aucune tâche de recouvrement ouverte."));
   },
 
   // Remise de pénalités et restructuration : ce sont des DEMANDES, décidées ensuite dans « Validations ».
@@ -703,7 +967,12 @@ const views = {
       const penalty = Number(st?.penalty_outstanding_usd ?? 0);
       detail.append(h("div", { class: "pgroup" },
         h("h3", {}, `${c.contract_number} — ${c.customer ? `${c.customer.first_name} ${c.customer.last_name}` : "client"}`),
-        st ? h("p", {}, `Statut : ${c.status} — Retard : ${st.overdue_days ?? 0} jour(s) — Pénalités dues : ${usd(penalty)} — Total restant dû : ${usd(st.total_outstanding_usd ?? 0)}`) : ""));
+        st ? kvList([
+          ["Statut", statusBadge(c.status)],
+          ["Retard", `${st.overdue_days ?? 0} jour(s)`],
+          ["Pénalités dues", usd(penalty)],
+          ["Total restant dû", usd(st.total_outstanding_usd ?? 0)],
+        ]) : ""));
 
       // Remise de pénalités
       const wAmount = h("input", { type: "number", step: "0.01", min: "0.01", placeholder: "Montant à remettre (USD)" });
@@ -723,7 +992,8 @@ const views = {
             wAmount.value = ""; wReason.value = "";
           } catch (err) { wResult.append(message("error", friendlyError(err.message))); }
         },
-      }, h("h3", {}, "Demander une remise de pénalités"), h("label", {}, "Montant", wAmount), h("label", {}, "Motif", wReason),
+      }, h("h3", {}, "Demander une remise de pénalités"),
+        h("div", { class: "form-grid" }, h("label", {}, "Montant", wAmount), h("label", {}, "Motif", wReason)),
         h("button", { type: "submit" }, "Envoyer la demande"), wResult));
 
       // Restructuration
@@ -745,14 +1015,14 @@ const views = {
             rDays.value = ""; rReason.value = ""; rWaive.checked = false;
           } catch (err) { rResult.append(message("error", friendlyError(err.message))); }
         },
-      }, h("h3", {}, "Demander une restructuration"), h("label", {}, "Nouvelle durée (jours)", rDays), h("label", {}, "Fréquence", rFreq),
-        h("label", {}, rWaive, "Effacer aussi les pénalités"), h("label", {}, "Motif", rReason),
+      }, h("h3", {}, "Demander une restructuration"),
+        h("div", { class: "form-grid" }, h("label", {}, "Nouvelle durée (jours)", rDays), h("label", {}, "Fréquence", rFreq), h("label", {}, "Motif", rReason)),
+        h("label", { class: "check" }, rWaive, h("span", {}, "Effacer aussi les pénalités")),
         h("button", { type: "submit" }, "Envoyer la demande"), rResult));
     };
 
-    return h("div", { class: "card" }, h("h2", {}, "Remises et restructuration"),
-      h("p", {}, "Cherchez un contrat par son numéro. Les demandes sont ensuite décidées dans « Validations »."),
-      h("form", { onsubmit: lookup }, h("label", {}, "Numéro de contrat", numberInput), h("button", { type: "submit" }, "Chercher")),
+    return page("Remises et restructuration", "Cherchez un contrat par son numéro. Les demandes sont ensuite décidées dans « Validations ».",
+      h("form", { class: "search-row", onsubmit: lookup }, h("label", {}, "Numéro de contrat", numberInput), h("button", { type: "submit" }, "Chercher")),
       out, detail);
   },
 
@@ -769,114 +1039,190 @@ const views = {
     if (notice) out.append(message("ok", notice));
     const checks = new Map();
     const rows = (data ?? []).map((it) => {
-      const box = h("input", { type: "checkbox", ...(canEdit ? {} : { disabled: "" }) });
+      const box = h("input", { type: "checkbox", "aria-label": `Sélectionner ${it.brand} ${it.model} (${it.imei})`, ...(canEdit ? {} : { disabled: "" }) });
       checks.set(it.id, box);
       return { it, box };
     });
 
-    const agencySelect = h("select", {}, ...(agencies ?? []).map((a) => h("option", { value: a.id }, a.region ? `${a.name} (${a.region})` : a.name)));
+    const agencySelect = h("select", { "aria-label": "Agence de destination" }, ...(agencies ?? []).map((a) => h("option", { value: a.id }, a.region ? `${a.name} (${a.region})` : a.name)));
+    const toggleAll = () => {
+      const all = rows.length > 0 && rows.every((r) => r.box.checked);
+      rows.forEach((r) => { r.box.checked = !all; });
+    };
     const assign = async () => {
       out.replaceChildren();
       const ids = rows.filter((r) => r.box.checked).map((r) => r.it.id);
       if (!ids.length) { out.append(message("error", "Sélectionnez au moins un appareil.")); return; }
       if (!agencySelect.value) { out.append(message("error", "Aucune agence disponible.")); return; }
-      if (!confirm(`Affecter ${ids.length} appareil(s) à l'agence « ${agencySelect.selectedOptions[0].textContent} » ?`)) return;
+      const agencyName = agencySelect.selectedOptions[0].textContent;
+      if (!(await confirmDialog("Affecter à une agence", `Affecter ${ids.length} appareil(s) à l'agence « ${agencyName} » ?`, "Affecter"))) return;
       try {
         await api("assign_stock_to_agency", { p_items: ids, p_agency: agencySelect.value });
         show(await views.stock(me, `${ids.length} appareil(s) affecté(s).`));
       } catch (err) { out.append(message("error", friendlyError(err.message))); }
     };
 
-    return h("div", { class: "card" }, h("h2", {}, "Stock en magasin"),
-      h("p", {}, "Seuls les téléphones en stock peuvent changer d'agence."),
+    return page("Stock en magasin", "Seuls les téléphones en stock peuvent changer d'agence.",
       canEdit
-        ? h("p", {}, "Agence de destination : ", agencySelect, " ", h("button", { class: "primary", onclick: assign }, "Affecter la sélection"))
-        : h("p", {}, "Lecture seule : seul l'administrateur système peut affecter le stock."),
+        ? h("div", { class: "toolbar" },
+          h("span", { class: "inline-label" }, "Agence de destination :"), agencySelect,
+          h("button", { class: "primary", onclick: assign }, "Affecter la sélection"),
+          h("button", { class: "btn ghost", onclick: toggleAll }, "Tout sélectionner / désélectionner"))
+        : message("info", "Lecture seule : seul l'administrateur système peut affecter le stock."),
       out,
       table(rows.map((r) => r.it), [
         { label: "", render: (it) => checks.get(it.id) },
-        { label: "IMEI", key: "imei" },
+        { label: "IMEI", key: "imei", cls: "mono" },
         { label: "Appareil", render: (it) => `${it.brand} ${it.model}` },
-        { label: "Prix", render: (it) => usd(it.retail_price) },
+        { label: "Prix", render: (it) => usd(it.retail_price), cls: "num" },
         { label: "Agence actuelle", render: (it) => it.agency?.name ?? "—" },
-      ]));
+      ], "Aucun téléphone en stock."));
   },
 
 };
 
-const MENU = [
-  ["home", "Accueil"], ["simulator", "Simulateur"], ["policy", "Politique de crédit"],
-  ["payment", "Paiement manuel"], ["applications", "Dossiers"], ["devices", "Appareils"], ["approvals", "Validations"],
-  ["reviews", "Dossiers à décider"], ["cash", "Espèces à confirmer"], ["merchants", "Numéros marchands"],
-  ["sims", "SIM à valider"], ["devicepolicy", "Politique des appareils"],
-  ["collections", "Recouvrement"], ["contracts", "Remises et restructuration"],
-  ["stock", "Stock"],
-];
-
+// ---------------------------------------------------------------- navigation et démarrage
 let me = null;
+let currentView = null;
+
+const viewFromHash = () => {
+  const m = /^#\/([a-z]+)$/.exec(location.hash);
+  return m && VIEW_LABELS[m[1]] ? m[1] : null;
+};
+
+function setNav(isOpen) {
+  document.body.classList.toggle("nav-open", isOpen);
+  $("#menu-toggle").setAttribute("aria-expanded", String(isOpen));
+  $("#menu-toggle").setAttribute("aria-label", isOpen ? "Fermer le menu" : "Ouvrir le menu");
+  $("#scrim").hidden = !isOpen;
+}
+const closeNav = () => setNav(false);
 
 async function open(name) {
-  document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
-  show(h("p", {}, "Chargement..."));
-  try { show(await views[name](me)); } catch (e) { show(message("error", e.message)); }
+  currentView = name;
+  document.querySelectorAll("#nav a").forEach((a) => {
+    if (a.dataset.view === name) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  });
+  document.title = `${VIEW_LABELS[name]} · CTM`;
+  closeNav();
+  show(loading());
+  let el;
+  try { el = await views[name](me); } catch (e) { el = message("error", e.message); }
+  if (currentView !== name) return; // la personne est déjà passée à une autre page
+  show(el);
+  window.scrollTo(0, 0);
+  $("#view").focus({ preventScroll: true });
+}
+
+function renderWho(email, role) {
+  $("#who").replaceChildren(
+    h("span", { class: "avatar", "aria-hidden": "true" }, (email || "?").trim().slice(0, 2)),
+    h("span", { class: "who-text" }, h("span", { class: "who-mail" }, email), role ? h("span", { class: "who-role" }, roleLabel(role)) : ""));
 }
 
 async function start() {
   const { data: { session } } = await sb.auth.getSession();
   if (recovering && session) {
     $("#login").hidden = true; $("#app").hidden = true; $("#reset").hidden = false;
-    $("#logout").hidden = true;
+    $("#logout").hidden = true; $("#menu-toggle").hidden = true;
     return;
   }
   $("#reset").hidden = true;
   $("#login").hidden = !!session;
   $("#app").hidden = !session;
   $("#logout").hidden = !session;
+  $("#menu-toggle").hidden = !session;
   document.body.classList.toggle("logged", !!session);
-  if (!session) { $("#who").textContent = ""; return; }
+  if (!session) { $("#who").replaceChildren(); currentView = null; closeNav(); document.title = "CTM · Crédit Téléphone"; return; }
 
   try { me = await api("me"); } catch (e) { me = null; }
   if (!me) {
-    $("#who").textContent = session.user.email;
+    renderWho(session.user.email);
+    $("#nav").replaceChildren();
+    $("#menu-toggle").hidden = true;
     show(message("error", "Compte non configuré : aucune fiche app_user pour cet utilisateur."));
     return;
   }
-  $("#who").textContent = `${session.user.email} (${me.role})`;
-  $("#nav").replaceChildren(...MENU.map(([k, label]) => h("button", { "data-view": k, onclick: () => open(k) }, label)));
-  open("home");
+  renderWho(session.user.email, me.role);
+  $("#nav").replaceChildren(...NAV_GROUPS.map((g) => h("div", { class: "nav-group" },
+    g.title ? h("p", { class: "nav-title" }, g.title) : "",
+    ...g.items.map((i) => h("a", {
+      class: "nav-link", href: `#/${i.key}`, "data-view": i.key,
+      onclick: (e) => { if (viewFromHash() === i.key) { e.preventDefault(); open(i.key); } closeNav(); },
+    }, icon(i.icon), h("span", {}, i.label))))));
+  open(viewFromHash() ?? "home");
 }
+
+window.addEventListener("hashchange", () => {
+  const name = viewFromHash();
+  if (name && me && !$("#app").hidden) open(name);
+});
+$("#menu-toggle").addEventListener("click", () => setNav(!document.body.classList.contains("nav-open")));
+$("#scrim").addEventListener("click", closeNav);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeNav(); });
+window.matchMedia("(min-width: 901px)").addEventListener("change", (e) => { if (e.matches) closeNav(); });
+
+// Messages d'authentification en français
+const AUTH_ERRORS = [
+  [/invalid login credentials/i, "Email ou mot de passe incorrect."],
+  [/email not confirmed/i, "Cette adresse e-mail n'est pas encore confirmée."],
+  [/rate limit|too many/i, "Trop de tentatives. Réessayez dans quelques minutes."],
+  [/failed to fetch|network|load failed/i, "Connexion impossible. Vérifiez votre accès internet."],
+];
+const friendlyAuthError = (msg) => { for (const [p, t] of AUTH_ERRORS) if (p.test(msg)) return t; return msg; };
+
+$("#toggle-password").addEventListener("click", (e) => {
+  const input = $("#password");
+  const reveal = input.type === "password";
+  input.type = reveal ? "text" : "password";
+  e.currentTarget.setAttribute("aria-pressed", String(reveal));
+  e.currentTarget.setAttribute("aria-label", reveal ? "Masquer le mot de passe" : "Afficher le mot de passe");
+});
 
 $("#login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  $("#login-error").textContent = "";
-  const { error } = await sb.auth.signInWithPassword({ email: $("#email").value, password: $("#password").value });
-  if (error) { $("#login-error").textContent = error.message; return; }
+  const err = $("#login-error");
+  const btn = $("#login-form button[type=submit]");
+  err.className = "form-msg error"; err.textContent = "";
+  setBusy(btn, true);
+  try {
+    const { error } = await sb.auth.signInWithPassword({ email: $("#email").value, password: $("#password").value });
+    if (error) { err.textContent = friendlyAuthError(error.message); return; }
+  } finally { setBusy(btn, false); }
   start();
 });
 
 $("#forgot").addEventListener("click", async (e) => {
   e.preventDefault();
   const err = $("#login-error");
-  err.className = "error"; err.textContent = "";
+  err.className = "form-msg error"; err.textContent = "";
   const email = $("#email").value.trim();
-  if (!email) { err.textContent = "Saisissez d'abord votre e-mail ci-dessus."; return; }
+  if (!email) { err.textContent = "Saisissez d'abord votre e-mail ci-dessus."; $("#email").focus(); return; }
   const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + "/" });
-  if (error) { err.textContent = error.message; return; }
-  err.className = "ok";
+  if (error) { err.textContent = friendlyAuthError(error.message); return; }
+  err.className = "form-msg ok";
   err.textContent = "Si ce compte existe, un e-mail de réinitialisation vient d'être envoyé.";
 });
 
 $("#reset-form").addEventListener("submit", async (e) => {
   e.preventDefault();
+  const btn = $("#reset-form button[type=submit]");
   $("#reset-error").textContent = "";
-  const { error } = await sb.auth.updateUser({ password: $("#new-password").value });
-  if (error) { $("#reset-error").textContent = error.message; return; }
+  setBusy(btn, true);
+  try {
+    const { error } = await sb.auth.updateUser({ password: $("#new-password").value });
+    if (error) { $("#reset-error").textContent = friendlyAuthError(error.message); return; }
+  } finally { setBusy(btn, false); }
   recovering = false;
   history.replaceState(null, "", location.pathname);
   $("#new-password").value = "";
   start();
 });
 
-$("#logout").addEventListener("click", async () => { await sb.auth.signOut(); start(); });
+$("#logout").addEventListener("click", async () => {
+  await sb.auth.signOut();
+  history.replaceState(null, "", location.pathname + location.search);
+  start();
+});
 
 start();
