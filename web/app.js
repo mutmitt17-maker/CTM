@@ -958,7 +958,7 @@ const views = {
       const number = numberInput.value.trim().toUpperCase();
       if (!/^CT-\d{4}-\d{6}$/.test(number)) { out.append(message("error", "Numéro de contrat invalide (format : CT-2026-000123).")); return; }
       const { data: c, error } = await sb.from("loan_contract")
-        .select("id, contract_number, status, customer(first_name, last_name)").eq("contract_number", number).maybeSingle();
+        .select("id, contract_number, status, loan_application(customer(first_name, last_name))").eq("contract_number", number).maybeSingle();
       if (error) { out.append(message("error", error.message)); return; }
       if (!c) { out.append(message("error", "Contrat introuvable (ou non visible avec votre rôle).")); return; }
       let st = null;
@@ -966,7 +966,7 @@ const views = {
 
       const penalty = Number(st?.penalty_outstanding_usd ?? 0);
       detail.append(h("div", { class: "pgroup" },
-        h("h3", {}, `${c.contract_number} — ${c.customer ? `${c.customer.first_name} ${c.customer.last_name}` : "client"}`),
+        h("h3", {}, `${c.contract_number} — ${c.loan_application?.customer ? `${c.loan_application.customer.first_name} ${c.loan_application.customer.last_name}` : "client"}`),
         st ? kvList([
           ["Statut", statusBadge(c.status)],
           ["Retard", `${st.overdue_days ?? 0} jour(s)`],
