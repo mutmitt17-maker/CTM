@@ -36,6 +36,14 @@ class HttpAgentApiTest {
         assertTrue(result is AgentApi.LoginResult.Failure && result.message.startsWith("Pas de connexion"))
     }
 
+    @Test fun `mot de passe oublie sur adresse de test renvoie un message clair en francais`() = withEnv { env ->
+        env.reply(400, """{"code":400,"error_code":"email_address_invalid","msg":"Email address \"agent@ctm.local\" is invalid"}""")
+        val result = blocking { env.agent.resetPassword("agent@ctm.local") }
+        assertTrue(result is ApiResult.Failure && result.message.contains("domaine fictif"))
+        val req = env.server.takeRequest()
+        assertEquals("/auth/v1/recover", req.path)
+    }
+
     // ------------------------------------------------------------------ session et catalogue
     @Test fun `me assemble la session avec agence et email`() = withEnv { env ->
         env.data("""{"id":"u-1","role":"field_agent","status":"active","agency_id":"ag-1"}""")

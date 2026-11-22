@@ -9,6 +9,13 @@ import com.ctm.credit.network.ApiException
  */
 object ErrorMessages {
     private val known: List<Pair<Regex, String>> = listOf(
+        // Connexion & réinitialisation mot de passe (Supabase Auth)
+        Regex("email address .* is invalid", RegexOption.IGNORE_CASE) to
+            "Cette adresse de test n'accepte pas l'envoi d'e-mail (domaine fictif ou non routable). Utilisez un vrai e-mail ou réinitialisez depuis Supabase.",
+        Regex("for security purposes, you can only request this after", RegexOption.IGNORE_CASE) to
+            "Patientez quelques secondes avant de redemander un e-mail.",
+        Regex("email rate limit exceeded", RegexOption.IGNORE_CASE) to
+            "Limite d'envoi d'e-mails atteinte sur le serveur. Réessayez plus tard.",
         // Livraison & agent
         Regex("only an approved application can be delivered", RegexOption.IGNORE_CASE) to "Seul un dossier approuvé peut être livré.",
         Regex("not allowed to deliver this application", RegexOption.IGNORE_CASE) to "Vous n'avez pas le droit de livrer ce dossier.",
