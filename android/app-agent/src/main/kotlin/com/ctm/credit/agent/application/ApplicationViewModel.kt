@@ -62,10 +62,10 @@ class ApplicationViewModel(
             itemId       = catalogItem.id,
             brand        = catalogItem.brand,
             model        = catalogItem.model,
-            color        = null,
+            color        = catalogItem.color,
             retailPrice  = BigDecimal.valueOf(catalogItem.retailPrice).setScale(2, RoundingMode.HALF_UP),
-            minDownPaymentPct = null,
-            imeiSuffix   = null,
+            minDownPaymentPct = catalogItem.minDownPaymentPct?.let { BigDecimal.valueOf(it).setScale(4, RoundingMode.HALF_UP) },
+            imeiSuffix   = catalogItem.imeiSuffix,
         )
         val terms = CreditTerms(
             downPaymentMinPct      = BigDecimal.valueOf(policy.downPaymentMinPct).setScale(4, RoundingMode.HALF_UP),

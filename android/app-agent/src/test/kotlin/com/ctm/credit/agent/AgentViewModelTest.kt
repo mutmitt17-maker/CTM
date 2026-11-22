@@ -99,6 +99,26 @@ class HomeViewModelTest {
         assertTrue((vm.state.value as HomeViewModel.State.Ready).calculatorOk)
     }
 
+    @Test fun `sans reseau la session et le catalogue en cache permettent de travailler`() = scope.runTest {
+        val cache = listOf(SAMSUNG) to testPolicy()
+        val session = AgentSession("uid-1", "ag-1", "Kinshasa", "Jean", "field_agent", "active")
+        val api = FakeAgentApi(meFails = true, catalogueFails = true)
+        val vm = HomeViewModel(api, engine(), this, cache, cachedCalculatorOk = true, cachedSession = session)
+        vm.load()
+        dispatcher.scheduler.advanceUntilIdle()
+        val ready = vm.state.value as HomeViewModel.State.Ready
+        assertEquals(session, ready.session)
+        assertEquals(listOf(SAMSUNG), ready.items)
+        assertTrue(ready.calculatorOk)
+    }
+
+    @Test fun `sans reseau et sans session en cache renvoie une erreur`() = scope.runTest {
+        val vm = HomeViewModel(FakeAgentApi(meFails = true), engine(), this)
+        vm.load()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(vm.state.value is HomeViewModel.State.Error)
+    }
+
     @Test fun `sans réseau et sans cache renvoie une erreur`() = scope.runTest {
         val vm = HomeViewModel(FakeAgentApi(catalogueFails = true), engine(), this)
         vm.load()
@@ -196,6 +216,15 @@ class ApplicationViewModelTest {
         assertTrue((state as ApplicationViewModel.State.Error).message.contains("minimum"))
     }
 
+    @Test fun `acompte minimum propre au telephone est respecte`() = scope.runTest {
+        val vm = ApplicationViewModel(engine(), testPolicy(), this)
+        // la politique demande 20 % (30 USD), mais ce telephone demande 40 % de 150 = 60 USD
+        vm.simulate(form(item = CatalogItem("item-7", "Itel", "A60", 150.0, null, minDownPaymentPct = 40.0), down = "30"))
+        val state = vm.state.value
+        assertTrue(state is ApplicationViewModel.State.Error)
+        assertTrue((state as ApplicationViewModel.State.Error).message.contains("minimum"))
+    }
+
     @Test fun `durée non autorisée renvoie une erreur`() = scope.runTest {
         val vm = ApplicationViewModel(engine(), testPolicy(), this)
         vm.simulate(form(days = 45))
@@ -247,9 +276,72 @@ class DeliveryViewModelTest {
         assertEquals(DeliveryViewModel.State.ProofRecorded("deliv-1"), vm.state.value)
         assertEquals(listOf(listOf("deliv-1", "deliv-1/proof.jpg", "sighash", "fp-agent")), api.proofCalls)
 
+        vm.requestEnrollment("deliv-1")
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(DeliveryViewModel.State.EnrollmentRequested("deliv-1"), vm.state.value)
+        assertEquals(1, api.enrollCalls)
+
+        vm.checkEnrollment("deliv-1")
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(DeliveryViewModel.State.Enrolled("deliv-1"), vm.state.value)
+
         vm.completeDelivery("deliv-1")
         dispatcher.scheduler.advanceUntilIdle()
         assertEquals(DeliveryViewModel.State.Completed("deliv-1"), vm.state.value)
+    }
+
+    @Test fun `enrolement en attente puis confirme par le serveur`() = scope.runTest {
+        val api = FakeAgentApi().apply {
+            mdmStatuses.addLast(ApiResult.Ok(MdmStatus.TOKEN_REQUESTED))
+            mdmStatuses.addLast(ApiResult.Ok(MdmStatus.ENROLLED))
+        }
+        val vm = DeliveryViewModel(api, ConstantFingerprint(), this)
+        vm.requestEnrollment("deliv-1")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        vm.checkEnrollment("deliv-1")
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(DeliveryViewModel.State.EnrollmentRequested("deliv-1"), vm.state.value)
+
+        vm.checkEnrollment("deliv-1")
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(DeliveryViewModel.State.Enrolled("deliv-1"), vm.state.value)
+    }
+
+    @Test fun `enrolement echoue permet de relancer la demande`() = scope.runTest {
+        val api = FakeAgentApi().apply { mdmStatuses.addLast(ApiResult.Ok(MdmStatus.FAILED)) }
+        val vm = DeliveryViewModel(api, ConstantFingerprint(), this)
+        vm.requestEnrollment("deliv-1")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        vm.checkEnrollment("deliv-1")
+        dispatcher.scheduler.advanceUntilIdle()
+        val state = vm.state.value as DeliveryViewModel.State.Error
+        assertEquals(DeliveryViewModel.State.ProofRecorded("deliv-1"), state.previousState)
+
+        vm.requestEnrollment("deliv-1")
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(DeliveryViewModel.State.EnrollmentRequested("deliv-1"), vm.state.value)
+        assertEquals(2, api.enrollCalls)
+    }
+
+    @Test fun `refus du serveur pour la demande d enrolement est affiche`() = scope.runTest {
+        val api = FakeAgentApi().apply { enrollResult = ApiResult.Failure("Scannez et vérifiez d'abord l'IMEI.") }
+        val vm = DeliveryViewModel(api, ConstantFingerprint(), this)
+        vm.requestEnrollment("deliv-1")
+        dispatcher.scheduler.advanceUntilIdle()
+        val state = vm.state.value as DeliveryViewModel.State.Error
+        assertEquals("Scannez et vérifiez d'abord l'IMEI.", state.message)
+        assertEquals(DeliveryViewModel.State.ProofRecorded("deliv-1"), state.previousState)
+    }
+
+    @Test fun `cloture refusee reste a l etape enrole`() = scope.runTest {
+        val api = FakeAgentApi().apply { completeResult = ApiResult.Failure("Enrôlement non confirmé.") }
+        val vm = DeliveryViewModel(api, ConstantFingerprint(), this)
+        vm.completeDelivery("deliv-1")
+        dispatcher.scheduler.advanceUntilIdle()
+        val state = vm.state.value as DeliveryViewModel.State.Error
+        assertEquals(DeliveryViewModel.State.Enrolled("deliv-1"), state.previousState)
     }
 
     @Test fun `IMEI invalide - aucun appel au serveur`() = scope.runTest {

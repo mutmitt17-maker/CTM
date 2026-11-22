@@ -32,7 +32,16 @@ interface AgentApi {
         signerDevice: String,
     ): ApiResult<Unit>
 
-    /** action `complete_delivery`. */
+    /** action `request_mdm_enrollment` : le serveur prépare l'enrôlement MDM (verrouillage à distance) du téléphone. */
+    suspend fun requestMdmEnrollment(deliveryId: String): ApiResult<Unit>
+
+    /**
+     * Lecture de `delivery.mdm_status` (REST : l'agent voit ses livraisons). Le statut passe à `enrolled`
+     * quand le serveur a confirmé l'enrôlement ; `complete_delivery` est refusé tant que ce n'est pas fait.
+     */
+    suspend fun mdmStatus(deliveryId: String): ApiResult<MdmStatus>
+
+    /** action `complete_delivery` : refusée tant que l'IMEI, la preuve et l'enrôlement MDM ne sont pas confirmés. */
     suspend fun completeDelivery(deliveryId: String): ApiResult<Unit>
 
     // ---------------------------------------------------------------- résultats
@@ -57,3 +66,13 @@ sealed class ApiResult<out T> {
 
 /** Réponse de `verify_delivery_imei` : `matched` et, si faux, la raison renvoyée par le serveur. */
 data class ImeiCheck(val matched: Boolean, val reason: String? = null)
+
+/** Valeurs de `delivery.mdm_status` du serveur. */
+enum class MdmStatus(val wire: String) {
+    NOT_STARTED("not_started"), TOKEN_REQUESTED("token_requested"), ENROLLED("enrolled"), FAILED("failed");
+
+    companion object {
+        fun fromWire(value: String): MdmStatus =
+            entries.firstOrNull { it.wire == value } ?: error("mdm_status inconnu : $value")
+    }
+}
