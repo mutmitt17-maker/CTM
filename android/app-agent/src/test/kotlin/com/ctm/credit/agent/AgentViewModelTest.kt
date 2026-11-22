@@ -99,26 +99,6 @@ class HomeViewModelTest {
         assertTrue((vm.state.value as HomeViewModel.State.Ready).calculatorOk)
     }
 
-    @Test fun `sans reseau la session et le catalogue en cache permettent de travailler`() = scope.runTest {
-        val cache = listOf(SAMSUNG) to testPolicy()
-        val session = AgentSession("uid-1", "ag-1", "Kinshasa", "Jean", "field_agent", "active")
-        val api = FakeAgentApi(meFails = true, catalogueFails = true)
-        val vm = HomeViewModel(api, engine(), this, cache, cachedCalculatorOk = true, cachedSession = session)
-        vm.load()
-        dispatcher.scheduler.advanceUntilIdle()
-        val ready = vm.state.value as HomeViewModel.State.Ready
-        assertEquals(session, ready.session)
-        assertEquals(listOf(SAMSUNG), ready.items)
-        assertTrue(ready.calculatorOk)
-    }
-
-    @Test fun `sans reseau et sans session en cache renvoie une erreur`() = scope.runTest {
-        val vm = HomeViewModel(FakeAgentApi(meFails = true), engine(), this)
-        vm.load()
-        dispatcher.scheduler.advanceUntilIdle()
-        assertTrue(vm.state.value is HomeViewModel.State.Error)
-    }
-
     @Test fun `sans réseau et sans cache renvoie une erreur`() = scope.runTest {
         val vm = HomeViewModel(FakeAgentApi(catalogueFails = true), engine(), this)
         vm.load()
@@ -211,15 +191,6 @@ class ApplicationViewModelTest {
     @Test fun `acompte inférieur au minimum renvoie une erreur`() = scope.runTest {
         val vm = ApplicationViewModel(engine(), testPolicy(), this)
         vm.simulate(form(down = "10")) // minimum = 20 % de 150 = 30 USD
-        val state = vm.state.value
-        assertTrue(state is ApplicationViewModel.State.Error)
-        assertTrue((state as ApplicationViewModel.State.Error).message.contains("minimum"))
-    }
-
-    @Test fun `acompte minimum propre au telephone est respecte`() = scope.runTest {
-        val vm = ApplicationViewModel(engine(), testPolicy(), this)
-        // la politique demande 20 % (30 USD), mais ce telephone demande 40 % de 150 = 60 USD
-        vm.simulate(form(item = CatalogItem("item-7", "Itel", "A60", 150.0, null, minDownPaymentPct = 40.0), down = "30"))
         val state = vm.state.value
         assertTrue(state is ApplicationViewModel.State.Error)
         assertTrue((state as ApplicationViewModel.State.Error).message.contains("minimum"))

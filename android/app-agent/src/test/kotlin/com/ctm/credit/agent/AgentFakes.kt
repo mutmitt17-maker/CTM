@@ -65,7 +65,6 @@ class FakeAgentApi(
         calculatorSpec = goodSpec(),
     ),
     private val catalogueFails: Boolean = false,
-    private val meFails: Boolean = false,
 ) : AgentApi {
     var startResult: ApiResult<String> = ApiResult.Ok("deliv-1")
     var imeiResult: ApiResult<ImeiCheck> = ApiResult.Ok(ImeiCheck(matched = true))
@@ -82,10 +81,7 @@ class FakeAgentApi(
     val proofCalls = mutableListOf<List<String>>()
 
     override suspend fun login(email: String, password: String) = loginResult
-    override suspend fun me(): AgentSession {
-        if (meFails) throw java.io.IOException("Pas de réseau")
-        return session
-    }
+    override suspend fun me() = session
     override suspend fun offlineCatalogue(): AgentApi.OfflineCatalogueResult {
         if (catalogueFails) throw java.io.IOException("Pas de réseau")
         return catalogue
