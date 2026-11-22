@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CTM Crédit</string>
+    <string name="brand_name">CTM</string>
+    <string name="brand_subtitle">Crédit Téléphone</string>
+    <string name="login_title">Se connecter</string>
+    <string name="login_subtitle">Veuillez saisir votre email et mot de passe</string>
+    <string name="login_button">Se connecter</string>
+    <string name="forgot_password">Mot de passe oublié ?</string>
+    <string name="logout_button">Se déconnecter</string>
+    <string name="nav_home">Accueil</string>
+    <string name="nav_operations">Opérations</string>
+    <string name="nav_backoffice">Back-Office</string>
+    <string name="nav_sync">Synchronisation</string>
+    <string name="sync_now">Synchroniser maintenant</string>
+    <string name="hero_banner_desc">Illustration CTM Crédit Téléphone</string>
+    <string name="brand_logo_desc">Logo CTM</string>
+</resources>
