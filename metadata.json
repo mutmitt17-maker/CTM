@@ -1,0 +1,8 @@
+{
+  "name": "CTM Crédit Téléphone",
+  "description": "Application Android pour la vente à crédit de téléphones (agent de terrain, back-office et suivi client).",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
