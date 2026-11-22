@@ -27,7 +27,7 @@ jobs:
         with:
           gradle-version: "8.14.3"
       - name: Compile et teste
-        run: gradle :core-model:test :core-network:test :core-security:test :app-agent:test --no-daemon --stacktrace
+        run: gradle :core-model:test :core-network:test :core-security:test :app-agent:test :agent-http:test --no-daemon --stacktrace
       - name: Rapports de tests
         if: always()
         uses: actions/upload-artifact@v4

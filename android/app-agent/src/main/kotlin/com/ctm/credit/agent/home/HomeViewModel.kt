@@ -31,6 +31,8 @@ class HomeViewModel(
      * Faux par défaut : sans cette information, la simulation hors ligne reste désactivée (sécurité).
      */
     private val cachedCalculatorOk: Boolean = false,
+    /** Dernière session connue (nom, agence). Sert quand le réseau est coupé au démarrage. */
+    private val cachedSession: AgentSession? = null,
 ) {
     sealed class State {
         object Loading : State()
@@ -51,7 +53,13 @@ class HomeViewModel(
     fun load() {
         scope.launch {
             try {
-                val session = api.me()
+                val session = try {
+                    api.me()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    cachedSession ?: throw e
+                }
 
                 // Catalogue : réseau d'abord, cache ensuite.
                 val (items, policy, calculatorOk) = try {

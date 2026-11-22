@@ -20,6 +20,11 @@ data class CatalogItem(
     val model: String,
     val retailPrice: Double,
     val imageUrl: String?,
+    val color: String? = null,
+    /** Acompte minimum propre à ce téléphone (en %), déjà combiné avec celui de la politique par le serveur. */
+    val minDownPaymentPct: Double? = null,
+    /** 4 derniers chiffres de l'IMEI, pour reconnaître le téléphone en stock. */
+    val imeiSuffix: String? = null,
 )
 
 /** Politique de crédit utilisée pour la simulation locale. */
@@ -27,11 +32,12 @@ data class CreditPolicy(
     val processingFeeRate: Double,
     val interestRatePer30Days: Double,
     val penaltyRatePerDay: Double,
-    val penaltyCapRate: Double,
+    /** Non fournis par le catalogue hors ligne du serveur : inutiles pour la simulation. */
+    val penaltyCapRate: Double? = null,
     val graceDays: Int,
     val lockAfterDaysOverdue: Int,
-    val autoApproveMinScore: Int,
-    val reviewMinScore: Int,
+    val autoApproveMinScore: Int? = null,
+    val reviewMinScore: Int? = null,
     val downPaymentMinPct: Double,
     val downPaymentMaxPct: Double,
     val allowedDurations: List<Int>,
