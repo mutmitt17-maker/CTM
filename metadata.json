@@ -1,0 +1,8 @@
+{
+  "name": "CTM Crédit Téléphone",
+  "description": "Application Android Agent de terrain pour CTM Crédit Téléphone (KYC, simulation hors ligne, dossiers, encaissement cash, livraison MDM et synchronisation).",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CTM Crédit</string>
+    <string name="brand_name">CTM</string>
+    <string name="brand_subtitle">Crédit Téléphone · Agent</string>
+
+    <!-- Navigation & actions communes -->
+    <string name="action_back">Retour</string>
+    <string name="action_cancel">Annuler</string>
+    <string name="action_confirm">Confirmer</string>
+    <string name="action_refresh">Actualiser</string>
+    <string name="action_retry">Réessayer</string>
+    <string name="action_done">Terminé</string>
+    <string name="loading_default">Chargement…</string>
+    <string name="nav_home">Accueil</string>
+    <string name="nav_customer">Client</string>
+    <string name="nav_delivery">Livraison</string>
+    <string name="nav_payment">Espèces</string>
+    <string name="nav_sync">Sync</string>
+    <string name="hero_banner_desc">Illustration CTM Crédit Téléphone</string>
+    <string name="brand_logo_desc">Logo CTM</string>
+
+    <!-- Connexion -->
+    <string name="login_title">Se connecter</string>
+    <string name="login_subtitle">CTM · Crédit Téléphone — Veuillez saisir votre email et mot de passe</string>
+    <string name="login_email_label">Email</string>
+    <string name="login_email_placeholder">vous@exemple.com</string>
+    <string name="login_password_label">Mot de passe</string>
+    <string name="login_password_placeholder">Votre mot de passe</string>
+    <string name="login_show_password">Afficher le mot de passe</string>
+    <string name="login_hide_password">Masquer le mot de passe</string>
+    <string name="login_button">Se connecter</string>
+    <string name="forgot_password">Mot de passe oublié ?</string>
+    <string name="forgot_password_missing_email">Saisissez d\'abord votre e-mail ci-dessus.</string>
+    <string name="forgot_password_sent">Si ce compte existe, un e-mail de réinitialisation vient d\'être envoyé.</string>
+    <string name="logout_button">Se déconnecter</string>
+
+    <!-- Accueil Agent -->
+    <string name="home_title">CTM · Agent</string>
+    <string name="home_subtitle">Crédit Téléphone · Terrain</string>
+    <string name="home_loading">Chargement de la session et du catalogue…</string>
+    <string name="home_welcome">Bienvenue</string>
+    <string name="home_default_agent">Agent CTM</string>
+    <string name="home_offline_cache_notice">Mode hors ligne actif : catalogue chargé depuis le cache local.</string>
+    <string name="home_calculator_mismatch">Simulation hors ligne désactivée : le calculateur du téléphone diverge du serveur. Contactez l\'administrateur.</string>
+    <string name="home_section_operations">Opérations de terrain</string>
+    <string name="home_tile_simulator_title">Simulateur de crédit</string>
+    <string name="home_tile_simulator_desc">Calculez une offre hors ligne : acompte, durée, échéances.</string>
+    <string name="home_tile_simulator_disabled">Catalogue agent indisponible pour ce compte ou stock vide.</string>
+    <string name="home_tile_customer_title">Nouveau client</string>
+    <string name="home_tile_customer_desc">Enregistrez un client (+243) hors ligne et créez son dossier.</string>
+    <string name="home_tile_kyc_title">Dossier d\'identité (KYC)</string>
+    <string name="home_tile_kyc_desc">Pièce d\'identité, selfie, personne à contacter et consentements.</string>
+    <string name="home_tile_delivery_title">Livraison téléphone</string>
+    <string name="home_tile_delivery_desc">IMEI, photo, signature de remise et enrôlement MDM en ligne.</string>
+    <string name="home_tile_payment_title">Encaisser en espèces</string>
+    <string name="home_tile_payment_desc">Enregistrez un paiement reçu par numéro de contrat.</string>
+    <string name="home_sync_title">Synchronisation hors ligne</string>
+    <string name="home_sync_see_queue">Voir la file</string>
+    <string name="sync_now">Synchroniser maintenant</string>
+    <string name="sync_running">Synchronisation…</string>
+
+    <!-- Nouveau client -->
+    <string name="customer_title">Nouveau client</string>
+    <string name="customer_subtitle">Enregistrement hors ligne</string>
+    <string name="customer_queued_msg">Client enregistré sur le téléphone. Il sera envoyé au serveur à la prochaine synchronisation.</string>
+    <string name="customer_complete_kyc">Compléter le KYC (identité &amp; photos)</string>
+    <string name="customer_create_application">Créer un dossier de crédit pour ce client</string>
+    <string name="customer_first_name">Prénom</string>
+    <string name="customer_last_name">Nom</string>
+    <string name="customer_phone">Téléphone (+243…)</string>
+    <string name="customer_national_id">Numéro de pièce d\'identité</string>
+    <string name="customer_address">Adresse</string>
+    <string name="customer_city">Ville (facultatif)</string>
+    <string name="customer_submit">Enregistrer le client</string>
+
+    <!-- KYC & biométrie -->
+    <string name="kyc_title">Dossier d\'identité (KYC)</string>
+    <string name="kyc_subtitle">Identité, photos, contact d\'urgence et consentements</string>
+    <string name="kyc_step_customer">1. Sélectionner le client</string>
+    <string name="kyc_customer_id_label">ID du client (UUID)</string>
+    <string name="kyc_loading_customers">Chargement des clients récents…</string>
+    <string name="kyc_no_customers">Aucun client récent trouvé. Créez d\'abord un client ou saisissez son UUID.</string>
+    <string name="kyc_badge_local">Local</string>
+    <string name="kyc_badge_server">Serveur</string>
+    <string name="kyc_step_identity">2. Identité &amp; revenus</string>
+    <string name="kyc_birth_date">Date de naissance (AAAA-MM-JJ)</string>
+    <string name="kyc_commune">Commune</string>
+    <string name="kyc_neighborhood">Quartier</string>
+    <string name="kyc_occupation">Profession</string>
+    <string name="kyc_income_source">Source de revenu</string>
+    <string name="kyc_monthly_income">Revenu mensuel déclaré (USD)</string>
+    <string name="kyc_doc_type_label">Type de pièce d\'identité</string>
+    <string name="kyc_step_photos">3. Photos pièce &amp; selfie</string>
+    <string name="kyc_biometrics_server_notice">La vérification biométrique (vivacité et correspondance visage/pièce) est calculée côté serveur par worker-biometrics après l\'envoi des photos.</string>
+    <string name="kyc_doc_photo_title">Photo de la pièce d\'identité</string>
+    <string name="kyc_selfie_photo_title">Selfie du client</string>
+    <string name="kyc_photo_ready">Photo prête</string>
+    <string name="kyc_photo_missing">Aucune photo capturée</string>
+    <string name="kyc_take_photo">Prendre une photo</string>
+    <string name="kyc_pick_gallery">Galerie</string>
+    <string name="kyc_select_customer_first">Sélectionnez ou saisissez d\'abord un client avant de capturer une photo.</string>
+    <string name="kyc_camera_denied">Permission caméra refusée. Autorisez la caméra ou utilisez « Galerie ».</string>
+    <string name="kyc_photo_compress_error">Impossible de traiter cette image. Réessayez avec une autre photo.</string>
+    <string name="kyc_step_contact">4. Personne à contacter / Garant</string>
+    <string name="kyc_contact_name">Nom complet du contact</string>
+    <string name="kyc_contact_phone">Téléphone du contact (+243…)</string>
+    <string name="kyc_contact_relationship">Lien de parenté / relation</string>
+    <string name="kyc_contact_guarantor">Cette personne se porte garante du crédit</string>
+    <string name="kyc_step_consents">5. Consentements du client (v1.0)</string>
+    <string name="kyc_consent_biometrics">J\'accepte le traitement biométrique de ma photo et de ma pièce d\'identité.</string>
+    <string name="kyc_consent_credit_terms">J\'accepte les conditions générales du crédit téléphone CTM.</string>
+    <string name="kyc_consent_device_lock">J\'accepte le verrouillage à distance du téléphone (MDM) en cas de retard ou défaut.</string>
+    <string name="kyc_submit">Enregistrer le dossier KYC</string>
+    <string name="kyc_queued_msg">Dossier KYC enregistré hors ligne (kyc.submit, contact d\'urgence et 3 consentements). Ordre de synchronisation : client -> photos bucket kyc -> actions KYC.</string>
+    <string name="kyc_sync_now">Synchroniser maintenant</string>
+
+    <!-- Simulateur & dossier -->
+    <string name="simulator_title">Simulateur de crédit</string>
+    <string name="simulator_application_title">Dossier de crédit</string>
+    <string name="simulator_subtitle">Calcul hors ligne exact (vérifié contre le serveur)</string>
+    <string name="simulator_unavailable">Catalogue ou politique indisponible. Actualisez l\'accueil avec un compte agent.</string>
+    <string name="simulator_step_device">1. Téléphone en stock</string>
+    <string name="simulator_step_down">2. Acompte</string>
+    <string name="simulator_down_label">Acompte (USD)</string>
+    <string name="simulator_step_duration">3. Durée</string>
+    <string name="simulator_step_frequency">4. Fréquence de paiement</string>
+    <string name="simulator_run">Simuler</string>
+    <string name="simulator_submitting">Enregistrement du dossier…</string>
+    <string name="simulator_queued_msg">Dossier enregistré sur le téléphone. Il sera envoyé à la prochaine synchronisation.</string>
+    <string name="simulator_warning_above_range">Attention : l\'acompte dépasse la fourchette habituelle.</string>
+    <string name="simulator_offer_detail">Détail de l\'offre</string>
+    <string name="simulator_submit">Envoyer le dossier</string>
+
+    <!-- Encaissement cash -->
+    <string name="payment_title">Encaisser un paiement</string>
+    <string name="payment_subtitle">Espèces reçues par l\'agent (confirmées ensuite par la Finance)</string>
+    <string name="payment_new">Nouveau paiement</string>
+    <string name="payment_contract_label">Numéro de contrat (CT-2026-000123)</string>
+    <string name="payment_amount_label">Montant reçu (USD)</string>
+    <string name="payment_note_label">Note (facultatif)</string>
+    <string name="payment_submit">Enregistrer le paiement</string>
+
+    <!-- Livraison -->
+    <string name="delivery_title">Livraison téléphone</string>
+    <string name="delivery_subtitle">Procédure en ligne (IMEI, preuve de remise, MDM)</string>
+    <string name="delivery_working">Communication avec le serveur…</string>
+    <string name="delivery_step1_title">Étape 1 · Sélectionner le dossier approuvé</string>
+    <string name="delivery_app_id_label">ID du dossier (UUID)</string>
+    <string name="delivery_start">Démarrer la livraison</string>
+    <string name="delivery_loading_apps">Recherche des dossiers approuvés…</string>
+    <string name="delivery_ready_list">Dossiers approuvés prêts à livrer</string>
+    <string name="delivery_deliver_this">Livrer ce dossier</string>
+    <string name="delivery_step2_title">Étape 2 · Vérifier l\'IMEI du téléphone</string>
+    <string name="delivery_imei_label">IMEI scanné ou saisi (15 chiffres)</string>
+    <string name="delivery_verify_imei">Vérifier l\'IMEI</string>
+    <string name="delivery_step3_title">Étape 3 · Preuve de remise</string>
+    <string name="delivery_choose_photo">Choisir la photo de remise</string>
+    <string name="delivery_replace_photo">Changer la photo</string>
+    <string name="delivery_signature_hint">Signature du client (dessinez dans le cadre)</string>
+    <string name="delivery_signature_clear">Effacer la signature</string>
+    <string name="delivery_send_proof">Enregistrer la preuve</string>
+    <string name="delivery_step4_title">Étape 4 · Enrôlement MDM</string>
+    <string name="delivery_step4_desc">La preuve est enregistrée. Demandez maintenant l\'enrôlement MDM du téléphone.</string>
+    <string name="delivery_request_mdm">Demander l\'enrôlement MDM</string>
+    <string name="delivery_step5_title">Étape 5 · Confirmation MDM</string>
+    <string name="delivery_step5_desc">Enrôlement demandé. Vérifiez le statut jusqu\'à ce que le serveur confirme l\'enrôlement.</string>
+    <string name="delivery_check_mdm">Vérifier le statut MDM</string>
+    <string name="delivery_step6_title">Étape 6 · Clôturer la livraison</string>
+    <string name="delivery_step6_desc">Appareil enrôlé dans le MDM. La remise peut être clôturée.</string>
+    <string name="delivery_complete">Terminer la livraison</string>
+    <string name="delivery_completed_msg">Livraison terminée et contrat activé !</string>
+    <string name="delivery_new">Nouvelle livraison</string>
+
+    <!-- File de synchronisation -->
+    <string name="sync_title">Synchronisation</string>
+    <string name="sync_empty">Aucune action enregistrée dans la file locale.</string>
+    <string name="sync_correct_retry">Corriger et renvoyer (nouvelle clé)</string>
+    <string name="sync_superseded">Remplacée par une action corrigée.</string>
+    <string name="sync_dialog_payload_label">Contenu JSON corrigé</string>
+    <string name="sync_dialog_requeue">Remettre en file</string>
+</resources>

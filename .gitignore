@@ -1,5 +1,10 @@
-node_modules
+*.iml
+.gradle
+.kotlin
+/local.properties
+/.idea/
+.DS_Store
+/build
+*/build
 .env
 .env.*
-supabase/.temp
-supabase/.branches
