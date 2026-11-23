@@ -22,6 +22,7 @@ dependencies {
     implementation(project(":core-security"))
     implementation(project(":app-agent"))
     api(libs.okhttp)
+    api(libs.okio)
     implementation(libs.gson)
     implementation(libs.kotlinx.coroutines.core)
 

@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit
  *
  * Si le serveur répond 401, le jeton est renouvelé une fois avec le jeton de rafraîchissement, puis l'appel est rejoué.
  */
-class SupabaseHttp internal constructor(
+class SupabaseHttp private constructor(
     private val config: HttpConfig,
     private val tokens: TokenStore,
     private val device: DeviceFingerprint,
@@ -192,7 +192,7 @@ class SupabaseHttp internal constructor(
     companion object {
         const val MAX_PHOTO_BYTES = 5 * 1024 * 1024
 
-        fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
+        internal fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
