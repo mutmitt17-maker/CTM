@@ -17,6 +17,10 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
+
+        // Jeton App Check de test : fourni par la CI (secret GitHub APPCHECK_DEBUG_TOKEN), jamais écrit dans le dépôt.
+        val appCheckDebugToken = (System.getenv("APPCHECK_DEBUG_TOKEN") ?: "").replace("\"", "")
+        buildConfigField("String", "APPCHECK_DEBUG_TOKEN", "\"$appCheckDebugToken\"")
     }
 
     signingConfigs {

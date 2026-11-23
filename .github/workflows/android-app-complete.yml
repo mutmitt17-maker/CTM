@@ -45,6 +45,8 @@ jobs:
           gradle-version: "9.3.1"
 
       - name: Fabrique l’APK
+        env:
+          APPCHECK_DEBUG_TOKEN: ${{ secrets.APPCHECK_DEBUG_TOKEN }}
         run: gradle :app:assembleDebug --no-daemon --console=plain --stacktrace 2>&1 | tee build.log
 
       - name: Affiche les erreurs

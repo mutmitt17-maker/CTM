@@ -23,7 +23,10 @@ fun configureAppCheck(context: Context, intent: Intent?) {
         }
 
         if (BuildConfig.DEBUG) {
+            // Jeton reçu par Intent (Google AI Studio) ou, à défaut, jeton intégré par la CI (APK installé à la main).
             val debugToken = intent?.getStringExtra(DEBUG_TOKEN_EXTRA)
+                ?.takeIf { it.isNotEmpty() }
+                ?: BuildConfig.APPCHECK_DEBUG_TOKEN.takeIf { it.isNotEmpty() }
             if (!debugToken.isNullOrEmpty()) {
                 val persistenceKey = FirebaseApp.getInstance().persistenceKey
                 val prefs = context.getSharedPreferences(
