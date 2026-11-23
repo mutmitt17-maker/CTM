@@ -216,4 +216,34 @@ class HttpAgentApiTest {
         val r3 = blocking { env.agent.uploadStoragePhoto("kyc", "c-1/big.jpg", oversized) }
         assertTrue(r3 is ApiResult.Failure && r3.message.contains("5 Mo"))
     }
+
+    @Test fun `envoi preuve handover vers Storage utilise le bucket handover et contentType`() = withEnv { env ->
+        env.ok("""{"Key":"handover/d-1/sig.png"}""")
+        val res = blocking { env.agent.uploadHandoverObject("d-1/sig.png", byteArrayOf(9, 8), "image/png") }
+        assertEquals(ApiResult.Ok(Unit), res)
+        val req = env.server.takeRequest()
+        assertEquals("POST", req.method)
+        assertEquals("/storage/v1/object/handover/d-1/sig.png", req.path)
+        assertTrue(req.getHeader("Content-Type")?.startsWith("image/png") == true)
+    }
+
+    @Test fun `lecture dossiers et contrats agent mappe les champs REST`() = withEnv { env ->
+        env.ok(
+            """[{"id":"app-9","status":"approved","financed_amount":124.50,"decision_reason":"auto_approved","created_at":"2026-11-20T10:00:00Z","customer":{"first_name":"Amina","last_name":"Kabila","phone_number":"+243811111111"},"inventory_item":{"brand":"Samsung","model":"A15"}}]""",
+        )
+        env.ok(
+            """[{"id":"ct-9","contract_number":"CT-2026-000999","status":"active","outstanding_balance":90.25,"created_at":"2026-11-21T10:00:00Z","customer":{"first_name":"Amina","last_name":"Kabila"}}]""",
+        )
+
+        val apps = (blocking { env.agent.fetchAgentApplications() } as ApiResult.Ok).value
+        assertEquals(1, apps.size)
+        assertEquals("Amina Kabila", apps[0].customerName)
+        assertEquals("Samsung A15", apps[0].deviceLabel)
+        assertEquals(0, java.math.BigDecimal("124.50").compareTo(apps[0].financedAmount))
+
+        val contracts = (blocking { env.agent.fetchAgentContracts() } as ApiResult.Ok).value
+        assertEquals(1, contracts.size)
+        assertEquals("CT-2026-000999", contracts[0].contractNumber)
+        assertEquals(0, java.math.BigDecimal("90.25").compareTo(contracts[0].outstandingBalance))
+    }
 }

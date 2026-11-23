@@ -1,5 +1,10 @@
 package cd.ctm.agent.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -21,6 +26,7 @@ import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Badge
 import androidx.compose.material.icons.outlined.Calculate
+import androidx.compose.material.icons.outlined.FolderShared
 import androidx.compose.material.icons.outlined.LocalShipping
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.Sync
@@ -32,8 +38,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -42,17 +53,20 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import cd.ctm.agent.AppContainer
 import cd.ctm.agent.R
 import cd.ctm.agent.ui.components.AlertKind
 import cd.ctm.agent.ui.components.CtmAlertBanner
 import cd.ctm.agent.ui.components.CtmCard
+import cd.ctm.agent.ui.components.CtmConfirmDialog
 import cd.ctm.agent.ui.components.CtmLoadingView
 import cd.ctm.agent.ui.components.CtmScreenContainer
 import cd.ctm.agent.ui.components.roleLabel
@@ -78,11 +92,45 @@ fun HomeScreen(
     onLogout: () -> Unit,
     onNeedsLogin: () -> Unit,
 ) {
+    val context = LocalContext.current
     val dash by container.dashboard.collectAsState()
     val pending by container.pending.collectAsState()
     val pendingPhotos by container.pendingPhotos.collectAsState()
+    val otherAgentPending by container.otherAgentPending.collectAsState()
     val syncMessage by container.syncMessage.collectAsState()
     val syncRunning by container.syncRunning.collectAsState()
+    var confirmLogout by remember { mutableStateOf(false) }
+    var askedNotifPermission by rememberSaveable { mutableStateOf(false) }
+
+    val notifPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { _ -> }
+
+    LaunchedEffect(pending, pendingPhotos) {
+        if (!askedNotifPermission && (pending > 0 || pendingPhotos > 0) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                askedNotifPermission = true
+                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    if (confirmLogout) {
+        CtmConfirmDialog(
+            title = stringResource(R.string.logout_pending_title),
+            message = stringResource(R.string.logout_pending_message, pending, pendingPhotos),
+            danger = true,
+            onDismiss = { confirmLogout = false },
+            onConfirm = {
+                confirmLogout = false
+                onLogout()
+            },
+        )
+    }
 
     CtmScreenContainer(
         title = stringResource(R.string.home_title),
@@ -95,7 +143,9 @@ fun HomeScreen(
                 Icon(Icons.Outlined.Sync, contentDescription = stringResource(R.string.action_refresh))
             }
             IconButton(
-                onClick = onLogout,
+                onClick = {
+                    if (pending > 0 || pendingPhotos > 0) confirmLogout = true else onLogout()
+                },
                 modifier = Modifier.testTag("logout_button"),
             ) {
                 Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = stringResource(R.string.logout_button))
@@ -185,6 +235,13 @@ fun HomeScreen(
                     )
                 }
 
+                if (otherAgentPending > 0) {
+                    CtmAlertBanner(
+                        AlertKind.WARN,
+                        stringResource(R.string.home_other_agent_pending_warn, otherAgentPending),
+                    )
+                }
+
                 val agentTiles = listOf(
                     HomeTile(
                         title = stringResource(R.string.home_tile_simulator_title),
@@ -212,6 +269,13 @@ fun HomeScreen(
                         tag = "tile_kyc",
                     ),
                     HomeTile(
+                        title = stringResource(R.string.home_tile_portfolio_title),
+                        desc = stringResource(R.string.home_tile_portfolio_desc),
+                        icon = Icons.Outlined.FolderShared,
+                        route = Route.Portfolio,
+                        tag = "tile_portfolio",
+                    ),
+                    HomeTile(
                         title = stringResource(R.string.home_tile_delivery_title),
                         desc = stringResource(R.string.home_tile_delivery_desc),
                         icon = Icons.Outlined.LocalShipping,
@@ -222,7 +286,7 @@ fun HomeScreen(
                         title = stringResource(R.string.home_tile_payment_title),
                         desc = stringResource(R.string.home_tile_payment_desc),
                         icon = Icons.Outlined.AccountBalanceWallet,
-                        route = Route.Payment,
+                        route = Route.Payment(null),
                         tag = "tile_payment",
                     ),
                 )

@@ -26,6 +26,27 @@ data class AgentCustomerSummary(
     val id: String,
     val fullName: String,
     val phoneNumber: String?,
+    val createdAt: String? = null,
+)
+
+data class AgentApplicationSummary(
+    val id: String,
+    val status: String,
+    val financedAmount: BigDecimal,
+    val decisionReason: String?,
+    val createdAt: String?,
+    val customerName: String?,
+    val customerPhone: String?,
+    val deviceLabel: String?,
+)
+
+data class AgentContractSummary(
+    val id: String,
+    val contractNumber: String,
+    val status: String,
+    val outstandingBalance: BigDecimal,
+    val createdAt: String?,
+    val customerName: String?,
 )
 
 /**
@@ -80,9 +101,15 @@ class HttpAgentApi(private val http: SupabaseHttp) : AgentApi {
         http.uploadStorageObject(bucket, objectPath, bytes, contentType)
     }
 
-    suspend fun fetchRecentCustomers(limit: Int = 30): ApiResult<List<AgentCustomerSummary>> = attempt {
+    override suspend fun uploadHandoverObject(
+        objectPath: String,
+        bytes: ByteArray,
+        contentType: String,
+    ): ApiResult<Unit> = uploadStoragePhoto("handover", objectPath, bytes, contentType)
+
+    suspend fun fetchRecentCustomers(limit: Int = 50): ApiResult<List<AgentCustomerSummary>> = attempt {
         val arr = http.rest(
-            "customer?select=id,first_name,last_name,phone_number&order=created_at.desc&limit=$limit",
+            "customer?select=id,first_name,last_name,phone_number,created_at&order=created_at.desc&limit=$limit",
         )
         arr.mapNotNull { el ->
             val o = el.asJsonObjectOrNull() ?: return@mapNotNull null
@@ -93,6 +120,63 @@ class HttpAgentApi(private val http: SupabaseHttp) : AgentApi {
                 id = id,
                 fullName = fullName,
                 phoneNumber = o.stringOrNull("phone_number"),
+                createdAt = o.stringOrNull("created_at"),
+            )
+        }
+    }
+
+    suspend fun fetchAgentApplications(limit: Int = 50): ApiResult<List<AgentApplicationSummary>> = attempt {
+        val arr = http.rest(
+            "loan_application?select=id,status,financed_amount,decision_reason,created_at," +
+                "customer(first_name,last_name,phone_number),inventory_item(brand,model)" +
+                "&order=created_at.desc&limit=$limit",
+        )
+        arr.mapNotNull { el ->
+            val o = el.asJsonObjectOrNull() ?: return@mapNotNull null
+            val cust = o.get("customer").asJsonObjectOrNull()
+            val item = o.get("inventory_item").asJsonObjectOrNull()
+            val custName = cust?.let {
+                "${it.stringOrNull("first_name").orEmpty()} ${it.stringOrNull("last_name").orEmpty()}".trim()
+            }?.ifBlank { null }
+            val deviceLabel = item?.let {
+                "${it.stringOrNull("brand").orEmpty()} ${it.stringOrNull("model").orEmpty()}".trim()
+            }?.ifBlank { null }
+            val financedEl = o.get("financed_amount")
+            val financed = if (financedEl == null || financedEl.isJsonNull) BigDecimal.ZERO else financedEl.asBigDecimal
+            AgentApplicationSummary(
+                id = o.stringOrNull("id").orEmpty(),
+                status = o.stringOrNull("status").orEmpty(),
+                financedAmount = financed,
+                decisionReason = o.stringOrNull("decision_reason"),
+                createdAt = o.stringOrNull("created_at"),
+                customerName = custName,
+                customerPhone = cust?.stringOrNull("phone_number"),
+                deviceLabel = deviceLabel,
+            )
+        }
+    }
+
+    suspend fun fetchAgentContracts(limit: Int = 50): ApiResult<List<AgentContractSummary>> = attempt {
+        val arr = http.rest(
+            "contract?select=id,contract_number,status,outstanding_balance,created_at," +
+                "customer(first_name,last_name)" +
+                "&order=created_at.desc&limit=$limit",
+        )
+        arr.mapNotNull { el ->
+            val o = el.asJsonObjectOrNull() ?: return@mapNotNull null
+            val cust = o.get("customer").asJsonObjectOrNull()
+            val custName = cust?.let {
+                "${it.stringOrNull("first_name").orEmpty()} ${it.stringOrNull("last_name").orEmpty()}".trim()
+            }?.ifBlank { null }
+            val balEl = o.get("outstanding_balance")
+            val balance = if (balEl == null || balEl.isJsonNull) BigDecimal.ZERO else balEl.asBigDecimal
+            AgentContractSummary(
+                id = o.stringOrNull("id").orEmpty(),
+                contractNumber = o.stringOrNull("contract_number").orEmpty(),
+                status = o.stringOrNull("status").orEmpty(),
+                outstandingBalance = balance,
+                createdAt = o.stringOrNull("created_at"),
+                customerName = custName,
             )
         }
     }

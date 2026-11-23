@@ -1,13 +1,15 @@
 package cd.ctm.agent.data
 
 import android.content.Context
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.ctm.credit.agent.AgentSession
 import com.ctm.credit.agent.CatalogItem
 import com.ctm.credit.agent.CreditPolicy
 import com.google.gson.Gson
 
 /**
- * Dernier catalogue et dernière session reçus du serveur, pour travailler sans réseau.
+ * Dernier catalogue et dernière session reçus du serveur, chiffrés localement pour travailler sans réseau.
  */
 class CatalogueCache(context: Context) {
     data class Snapshot(
@@ -17,8 +19,25 @@ class CatalogueCache(context: Context) {
         val calculatorOk: Boolean,
     )
 
-    private val prefs = context.getSharedPreferences("ctm_catalogue_cache", Context.MODE_PRIVATE)
+    private val legacyPrefs = context.getSharedPreferences("ctm_catalogue_cache", Context.MODE_PRIVATE)
+    private val prefs = EncryptedSharedPreferences.create(
+        context,
+        "ctm_catalogue_cache_enc",
+        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
+        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+    )
     private val gson = Gson()
+
+    init {
+        val legacyText = legacyPrefs.getString(KEY, null)
+        if (legacyText != null && prefs.getString(KEY, null) == null) {
+            prefs.edit().putString(KEY, legacyText).apply()
+        }
+        if (legacyPrefs.contains(KEY)) {
+            legacyPrefs.edit().clear().apply()
+        }
+    }
 
     fun save(snapshot: Snapshot) {
         prefs.edit().putString(KEY, gson.toJson(snapshot)).apply()

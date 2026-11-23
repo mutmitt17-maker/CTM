@@ -385,6 +385,81 @@ class DeliveryViewModelTest {
         assertTrue(vm.state.value is DeliveryViewModel.State.Error)
         assertTrue(api.proofCalls.isEmpty())
     }
+
+    @Test fun `preuve avec upload envoie photo JPEG et signature PNG avant record_handover_proof`() = scope.runTest {
+        val api = FakeAgentApi()
+        val vm = DeliveryViewModel(api, ConstantFingerprint("fp-agent"), this)
+        vm.recordProofWithUpload(
+            deliveryId = "deliv-1",
+            photoObjectPath = "deliv-1/photo.jpg",
+            photoBytes = byteArrayOf(1, 2, 3),
+            signatureObjectPath = "deliv-1/sig.png",
+            signaturePngBytes = byteArrayOf(4, 5, 6, 7),
+            signatureHash = "abc123",
+        )
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(DeliveryViewModel.State.ProofRecorded("deliv-1"), vm.state.value)
+        assertEquals(
+            listOf(
+                Triple("deliv-1/photo.jpg", "image/jpeg", 3),
+                Triple("deliv-1/sig.png", "image/png", 4),
+            ),
+            api.handoverUploads,
+        )
+        assertEquals(listOf(listOf("deliv-1", "deliv-1/photo.jpg", "abc123", "fp-agent")), api.proofCalls)
+    }
+
+    @Test fun `echec upload photo handover bloque record_handover_proof`() = scope.runTest {
+        val api = FakeAgentApi().apply { handoverUploadResult = ApiResult.Failure("Stockage indisponible") }
+        val vm = DeliveryViewModel(api, ConstantFingerprint(), this)
+        vm.recordProofWithUpload(
+            deliveryId = "deliv-1",
+            photoObjectPath = "deliv-1/photo.jpg",
+            photoBytes = byteArrayOf(1, 2),
+            signatureObjectPath = "deliv-1/sig.png",
+            signaturePngBytes = byteArrayOf(3, 4),
+            signatureHash = "abc",
+        )
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue(vm.state.value is DeliveryViewModel.State.Error)
+        assertTrue(api.proofCalls.isEmpty())
+    }
+
+    @Test fun `polling automatique MDM confirme l enrolement puis s arrete`() = scope.runTest {
+        val api = FakeAgentApi().apply {
+            mdmStatuses.addLast(ApiResult.Ok(MdmStatus.TOKEN_REQUESTED))
+            mdmStatuses.addLast(ApiResult.Ok(MdmStatus.TOKEN_REQUESTED))
+            mdmStatuses.addLast(ApiResult.Ok(MdmStatus.ENROLLED))
+        }
+        val vm = DeliveryViewModel(api, ConstantFingerprint(), this)
+        vm.requestEnrollment("deliv-1")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        vm.startEnrollmentPolling("deliv-1", intervalMs = 1_000L, maxAttempts = 5)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(DeliveryViewModel.State.Enrolled("deliv-1"), vm.state.value)
+        assertFalse(vm.mdmPolling.value)
+        assertFalse(vm.mdmPollTimedOut.value)
+    }
+
+    @Test fun `polling automatique MDM signale le depassement de delai sans bloquer`() = scope.runTest {
+        val api = FakeAgentApi().apply {
+            repeat(3) { mdmStatuses.addLast(ApiResult.Ok(MdmStatus.TOKEN_REQUESTED)) }
+        }
+        val vm = DeliveryViewModel(api, ConstantFingerprint(), this)
+        vm.requestEnrollment("deliv-1")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        vm.startEnrollmentPolling("deliv-1", intervalMs = 500L, maxAttempts = 3)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(DeliveryViewModel.State.EnrollmentRequested("deliv-1"), vm.state.value)
+        assertFalse(vm.mdmPolling.value)
+        assertTrue(vm.mdmPollTimedOut.value)
+    }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)

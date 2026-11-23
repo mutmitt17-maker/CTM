@@ -69,6 +69,7 @@ class FakeAgentApi(
 ) : AgentApi {
     var startResult: ApiResult<String> = ApiResult.Ok("deliv-1")
     var imeiResult: ApiResult<ImeiCheck> = ApiResult.Ok(ImeiCheck(matched = true))
+    var handoverUploadResult: ApiResult<Unit> = ApiResult.Ok(Unit)
     var proofResult: ApiResult<Unit> = ApiResult.Ok(Unit)
     var completeResult: ApiResult<Unit> = ApiResult.Ok(Unit)
     var enrollResult: ApiResult<Unit> = ApiResult.Ok(Unit)
@@ -78,6 +79,8 @@ class FakeAgentApi(
     var startThrows = false
 
     val imeiCalls = mutableListOf<String>()
+    /** (objectPath, contentType, size) */
+    val handoverUploads = mutableListOf<Triple<String, String, Int>>()
     /** (deliveryId, photoPath, signatureHash, signerDevice) */
     val proofCalls = mutableListOf<List<String>>()
 
@@ -99,6 +102,15 @@ class FakeAgentApi(
     override suspend fun verifyDeliveryImei(deliveryId: String, scannedImei: String): ApiResult<ImeiCheck> {
         imeiCalls += scannedImei
         return imeiResult
+    }
+
+    override suspend fun uploadHandoverObject(
+        objectPath: String,
+        bytes: ByteArray,
+        contentType: String,
+    ): ApiResult<Unit> {
+        handoverUploads += Triple(objectPath, contentType, bytes.size)
+        return handoverUploadResult
     }
 
     override suspend fun recordHandoverProof(

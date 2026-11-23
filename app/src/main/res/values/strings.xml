@@ -51,14 +51,30 @@
     <string name="home_tile_customer_desc">Enregistrez un client (+243) hors ligne et créez son dossier.</string>
     <string name="home_tile_kyc_title">Dossier d\'identité (KYC)</string>
     <string name="home_tile_kyc_desc">Pièce d\'identité, selfie, personne à contacter et consentements.</string>
+    <string name="home_tile_portfolio_title">Mes clients &amp; dossiers</string>
+    <string name="home_tile_portfolio_desc">Suivez vos clients, statuts KYC/biométrie, dossiers et contrats.</string>
     <string name="home_tile_delivery_title">Livraison téléphone</string>
     <string name="home_tile_delivery_desc">IMEI, photo, signature de remise et enrôlement MDM en ligne.</string>
     <string name="home_tile_payment_title">Encaisser en espèces</string>
     <string name="home_tile_payment_desc">Enregistrez un paiement reçu par numéro de contrat.</string>
     <string name="home_sync_title">Synchronisation hors ligne</string>
     <string name="home_sync_see_queue">Voir la file</string>
+    <string name="home_other_agent_pending_warn">%1$d action(s) hors ligne créées par un autre agent sont encore sur ce téléphone. Reconnectez-vous avec son compte pour les envoyer.</string>
+    <string name="logout_pending_title">Actions en attente</string>
+    <string name="logout_pending_message">Il reste %1$d action(s) et %2$d photo(s) non synchronisée(s) sur ce téléphone. Elles resteront chiffrées localement jusqu\'à votre prochaine reconnexion. Se déconnecter quand même ?</string>
     <string name="sync_now">Synchroniser maintenant</string>
     <string name="sync_running">Synchronisation…</string>
+
+    <!-- Notifications sync & Verrou biométrique -->
+    <string name="sync_notif_channel">Synchronisation CTM</string>
+    <string name="sync_notif_title">Synchronisation en pause</string>
+    <string name="sync_notif_needs_login">Session expirée : reconnectez-vous pour envoyer vos dossiers en attente.</string>
+    <string name="biometric_lock_title">Application Agent verrouillée</string>
+    <string name="biometric_lock_subtitle">Confirmez votre identité pour accéder aux dossiers clients CTM.</string>
+    <string name="biometric_unlock_button">Déverrouiller</string>
+    <string name="biometric_prompt_title">Déverrouiller CTM Agent</string>
+    <string name="biometric_prompt_subtitle">Vérifiez votre empreinte, visage ou code appareil</string>
+    <string name="biometric_failed_msg">Authentification échouée. Réessayez pour continuer.</string>
 
     <!-- Nouveau client -->
     <string name="customer_title">Nouveau client</string>
@@ -153,24 +169,46 @@
     <string name="delivery_deliver_this">Livrer ce dossier</string>
     <string name="delivery_step2_title">Étape 2 · Vérifier l\'IMEI du téléphone</string>
     <string name="delivery_imei_label">IMEI scanné ou saisi (15 chiffres)</string>
+    <string name="delivery_scan_imei">Scanner l\'IMEI (caméra)</string>
+    <string name="delivery_scanner_title">Scanner le code-barres IMEI</string>
+    <string name="delivery_scanner_hint">Visez le code-barres IMEI à 15 chiffres sur la boîte ou sous la batterie.</string>
     <string name="delivery_verify_imei">Vérifier l\'IMEI</string>
     <string name="delivery_step3_title">Étape 3 · Preuve de remise</string>
-    <string name="delivery_choose_photo">Choisir la photo de remise</string>
+    <string name="delivery_take_photo">Prendre une photo</string>
+    <string name="delivery_choose_photo">Choisir depuis la galerie</string>
     <string name="delivery_replace_photo">Changer la photo</string>
     <string name="delivery_signature_hint">Signature du client (dessinez dans le cadre)</string>
     <string name="delivery_signature_clear">Effacer la signature</string>
-    <string name="delivery_send_proof">Enregistrer la preuve</string>
+    <string name="delivery_send_proof">Envoyer photo, signature et enregistrer</string>
     <string name="delivery_step4_title">Étape 4 · Enrôlement MDM</string>
     <string name="delivery_step4_desc">La preuve est enregistrée. Demandez maintenant l\'enrôlement MDM du téléphone.</string>
     <string name="delivery_request_mdm">Demander l\'enrôlement MDM</string>
     <string name="delivery_step5_title">Étape 5 · Confirmation MDM</string>
-    <string name="delivery_step5_desc">Enrôlement demandé. Vérifiez le statut jusqu\'à ce que le serveur confirme l\'enrôlement.</string>
+    <string name="delivery_step5_desc">Enrôlement demandé. L\'application vérifie automatiquement le statut auprès du serveur.</string>
+    <string name="delivery_polling_active">Vérification automatique en cours (toutes les 4 s)…</string>
+    <string name="delivery_polling_timeout">Délai dépassé : le téléphone n\'est pas encore marqué enrôlé. Appuyez sur « Vérifier le statut MDM » pour relancer.</string>
     <string name="delivery_check_mdm">Vérifier le statut MDM</string>
     <string name="delivery_step6_title">Étape 6 · Clôturer la livraison</string>
     <string name="delivery_step6_desc">Appareil enrôlé dans le MDM. La remise peut être clôturée.</string>
     <string name="delivery_complete">Terminer la livraison</string>
     <string name="delivery_completed_msg">Livraison terminée et contrat activé !</string>
     <string name="delivery_new">Nouvelle livraison</string>
+    <string name="delivery_abort_button">Abandonner / Changer de dossier</string>
+    <string name="delivery_abort_title">Abandonner la livraison en cours ?</string>
+    <string name="delivery_abort_message">La livraison reprise localement sera réinitialisée sur ce téléphone (le serveur garde ses étapes déjà validées).</string>
+
+    <!-- Suivi agent (Mes clients & dossiers) -->
+    <string name="portfolio_title">Mes clients &amp; dossiers</string>
+    <string name="portfolio_subtitle">Suivi terrain en ligne et file locale</string>
+    <string name="portfolio_search_hint">Rechercher nom, téléphone ou contrat…</string>
+    <string name="portfolio_tab_customers">Clients</string>
+    <string name="portfolio_tab_applications">Dossiers</string>
+    <string name="portfolio_tab_contracts">Contrats</string>
+    <string name="portfolio_empty">Aucun élément trouvé pour ce filtre.</string>
+    <string name="portfolio_action_kyc">Compléter KYC</string>
+    <string name="portfolio_action_new_app">Nouveau dossier</string>
+    <string name="portfolio_action_deliver">Livrer</string>
+    <string name="portfolio_action_collect">Encaisser</string>
 
     <!-- File de synchronisation -->
     <string name="sync_title">Synchronisation</string>

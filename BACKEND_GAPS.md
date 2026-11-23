@@ -25,6 +25,19 @@ Ce document recense les dépendances serveur vérifiées et les points qui deman
 3. **Codes d'erreur structurés (`reason`)** :
    - Retourner des codes machine stables (en plus des messages textuels) dans `process_sync_action` et les RPCs pour faciliter l'affichage localisé et la correction hors ligne sans dépendre de regex sur le texte d'erreur.
 
-## Étapes ultérieures (à suivre lors des jalons 3b / 3c)
-- **Étape 2 (Livraison 3b)** : bucket `handover/<delivery_id>/<unique>.jpg` INSERT-only (5 Mo), `MDM_MODE=live` (Knox Guard / ABM / Android Enterprise) dans `_shared/mdm.ts`, et charge utile QR d'enrôlement MDM si requise par le fournisseur.
-- **Étape 3+ (Sécurité & Client)** : `client-auth` OTP pour l'app Client et notifications push FCM pour l'agent (`worker-biometrics` / révision superviseur).
+## Étape 2 — Livraison, preuve de remise et MDM (implémenté côté Android)
+- **Bucket privé `handover`** : l'app téléverse la photo de remise (`handover/<delivery_id>/<unique>.jpg`, <= 4,5 Mo) et la signature PNG (`handover/<delivery_id>/<unique>_sig.png`) avant d'appeler `record_handover_proof`.
+  - **À vérifier côté Supabase Storage** : la règle RLS INSERT du bucket `handover` doit autoriser à la fois `image/jpeg` et `image/png` (5 Mo max, INSERT-only).
+- **Enrôlement MDM (`request_mdm_enrollment` / `confirm_mdm_enrollment`)** :
+  - L'app sonde automatiquement la table `delivery` (`GET /rest/v1/delivery?id=eq.<id>&select=mdm_enrolled_at,status`) toutes les 4 s jusqu'à confirmation ou expiration (~88 s) avec possibilité de relancer.
+  - En environnement réel, configurer `MDM_MODE=live` et l'adaptateur fournisseur dans `_shared/mdm.ts` ainsi que les variables de déploiement QR/Zero-Touch si requises.
+
+## Étapes 3 & 4 — Sécurité locale, synchronisation et suivi agent (implémenté côté Android)
+- **Lectures portefeuille agent (`AgentPortfolioScreen`)** :
+  - L'app lit `/rest/v1/customer`, `/rest/v1/application` (jointure `customer`, `device_model`, `credit_decision`) et `/rest/v1/contract` (jointure `customer`) sous le JWT de l'agent.
+  - **À vérifier côté RLS** : s'assurer que les politiques `SELECT` permettent à l'agent authentifié de lire les dossiers et contrats de son agence.
+- **Notifications push serveur (optionnel pour V2)** :
+  - L'app gère la notification locale en cas d'expiration de session lors de la synchronisation en arrière-plan (`WorkManager`), mais ne reçoit pas encore de push FCM lors des retours asynchrones `worker-biometrics` / révision superviseur.
+- **App Client séparée** :
+  - À créer dans un projet/applet distinct avec `client-auth` OTP.
+

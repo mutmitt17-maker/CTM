@@ -4,12 +4,15 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
-import android.database.sqlite.SQLiteOpenHelper
+import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.SupportSQLiteOpenHelper
 import com.ctm.credit.network.SyncAction
 import com.ctm.credit.network.SyncItem
 import com.ctm.credit.network.SyncStatus
 import com.ctm.credit.network.SyncStore
+import com.ctm.credit.security.DatabaseKey
 import com.google.gson.JsonParser
+import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import java.time.Instant
 
 data class LocalCustomerRef(
@@ -20,12 +23,43 @@ data class LocalCustomerRef(
 )
 
 /**
- * File durable des actions hors ligne (SQLite). Survit aux redémarrages.
- * Permet aussi d'inspecter toutes les actions pour corriger les conflits ou échecs.
+ * File durable chiffrée (SQLCipher + Android KeyStore) des actions hors ligne.
+ * - Migre automatiquement l'ancienne base non chiffrée `ctm_sync.db` vers `ctm_sync_enc.db`.
+ * - Isole les actions par `agent_id` afin qu'un autre agent connecté sur le même appareil
+ *   n'envoie pas accidentellement les actions d'un collègue.
  */
-class SqliteSyncStore(context: Context) : SQLiteOpenHelper(context, "ctm_sync.db", null, 1), SyncStore {
+class SqliteSyncStore(
+    private val context: Context,
+    databaseKey: DatabaseKey,
+    private val currentAgentId: () -> String? = { null },
+) : SyncStore {
 
-    override fun onCreate(db: SQLiteDatabase) {
+    private val helper: SupportSQLiteOpenHelper
+
+    init {
+        System.loadLibrary("sqlcipher")
+        val factory = SupportOpenHelperFactory(databaseKey.get())
+        val config = SupportSQLiteOpenHelper.Configuration.builder(context)
+            .name(ENCRYPTED_DB_NAME)
+            .callback(
+                object : SupportSQLiteOpenHelper.Callback(DB_VERSION) {
+                    override fun onCreate(db: SupportSQLiteDatabase) {
+                        createSchema(db)
+                    }
+
+                    override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
+                        if (oldVersion < 2) {
+                            db.execSQL("ALTER TABLE sync_item ADD COLUMN agent_id TEXT")
+                        }
+                    }
+                },
+            )
+            .build()
+        helper = factory.create(config)
+        migrateLegacyPlaintextIfNeeded()
+    }
+
+    private fun createSchema(db: SupportSQLiteDatabase) {
         db.execSQL(
             "CREATE TABLE sync_item (" +
                 "local_id INTEGER PRIMARY KEY, " +
@@ -39,15 +73,78 @@ class SqliteSyncStore(context: Context) : SQLiteOpenHelper(context, "ctm_sync.db
                 "result TEXT, " +
                 "error_code TEXT, " +
                 "attempts INTEGER NOT NULL, " +
-                "superseded_by TEXT)",
+                "superseded_by TEXT, " +
+                "agent_id TEXT)",
         )
         db.execSQL("CREATE INDEX sync_item_status_idx ON sync_item (status)")
+        db.execSQL("CREATE INDEX sync_item_agent_idx ON sync_item (agent_id)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    private fun migrateLegacyPlaintextIfNeeded() {
+        val legacyFile = context.getDatabasePath(LEGACY_DB_NAME)
+        if (!legacyFile.exists()) return
+        runCatching {
+            val encDb = helper.writableDatabase
+            SQLiteDatabase.openDatabase(legacyFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { plain ->
+                plain.rawQuery("SELECT * FROM sync_item", null).use { c ->
+                    encDb.beginTransaction()
+                    try {
+                        while (c.moveToNext()) {
+                            val cv = ContentValues().apply {
+                                put("local_id", c.getLong(c.getColumnIndexOrThrow("local_id")))
+                                put("idempotency_key", c.getString(c.getColumnIndexOrThrow("idempotency_key")))
+                                put("action", c.getString(c.getColumnIndexOrThrow("action")))
+                                put("payload", c.getString(c.getColumnIndexOrThrow("payload")))
+                                putStringOrNull(this, "entity_key", c)
+                                put("created_at", c.getString(c.getColumnIndexOrThrow("created_at")))
+                                put("updated_at", c.getString(c.getColumnIndexOrThrow("updated_at")))
+                                put("status", c.getString(c.getColumnIndexOrThrow("status")))
+                                putStringOrNull(this, "result", c)
+                                putStringOrNull(this, "error_code", c)
+                                put("attempts", c.getInt(c.getColumnIndexOrThrow("attempts")))
+                                putStringOrNull(this, "superseded_by", c)
+                                put("agent_id", currentAgentId())
+                            }
+                            encDb.insert("sync_item", SQLiteDatabase.CONFLICT_REPLACE, cv)
+                        }
+                        encDb.setTransactionSuccessful()
+                    } finally {
+                        encDb.endTransaction()
+                    }
+                }
+            }
+            context.deleteDatabase(LEGACY_DB_NAME)
+        }
+    }
+
+    private fun putStringOrNull(cv: ContentValues, column: String, c: Cursor) {
+        val idx = c.getColumnIndex(column)
+        if (idx >= 0 && !c.isNull(idx)) {
+            cv.put(column, c.getString(idx))
+        } else {
+            cv.putNull(column)
+        }
+    }
+
+    private fun ownerFilterClause(agentId: String?): Pair<String, Array<Any>> {
+        return if (agentId.isNullOrBlank()) {
+            "agent_id IS NULL" to emptyArray()
+        } else {
+            "(agent_id IS NULL OR agent_id = ?)" to arrayOf(agentId)
+        }
+    }
 
     @Synchronized
     override fun save(item: SyncItem) {
+        val db = helper.writableDatabase
+        var preservedAgentId: String? = null
+        db.query(
+            "SELECT agent_id FROM sync_item WHERE local_id = ? LIMIT 1",
+            arrayOf(item.localId),
+        ).use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) preservedAgentId = c.getString(0)
+        }
+        val owner = preservedAgentId ?: currentAgentId()
         val values = ContentValues().apply {
             put("local_id", item.localId)
             put("idempotency_key", item.idempotencyKey)
@@ -61,16 +158,18 @@ class SqliteSyncStore(context: Context) : SQLiteOpenHelper(context, "ctm_sync.db
             put("error_code", item.errorCode)
             put("attempts", item.attempts)
             put("superseded_by", item.supersededBy)
+            put("agent_id", owner)
         }
-        writableDatabase.insertWithOnConflict("sync_item", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        db.insert("sync_item", SQLiteDatabase.CONFLICT_REPLACE, values)
     }
 
     @Synchronized
     override fun sendable(limit: Int, excludeEntities: Set<String>): List<SyncItem> {
         val out = ArrayList<SyncItem>()
-        readableDatabase.rawQuery(
-            "SELECT * FROM sync_item WHERE status IN ('PENDING','SENT') ORDER BY local_id ASC",
-            null,
+        val (ownerClause, ownerArgs) = ownerFilterClause(currentAgentId())
+        helper.readableDatabase.query(
+            "SELECT * FROM sync_item WHERE status IN ('PENDING','SENT') AND $ownerClause ORDER BY local_id ASC",
+            ownerArgs,
         ).use { c ->
             while (out.size < limit && c.moveToNext()) {
                 val item = readItem(c)
@@ -84,14 +183,28 @@ class SqliteSyncStore(context: Context) : SQLiteOpenHelper(context, "ctm_sync.db
     @Synchronized
     override fun blockedEntities(): Set<String> {
         val out = HashSet<String>()
-        readableDatabase.rawQuery(
+        val (ownerClause, ownerArgs) = ownerFilterClause(currentAgentId())
+        helper.readableDatabase.query(
             "SELECT entity_key FROM sync_item WHERE status IN ('FAILED','CONFLICT') " +
-                "AND superseded_by IS NULL AND entity_key IS NOT NULL",
-            null,
+                "AND superseded_by IS NULL AND entity_key IS NOT NULL AND $ownerClause",
+            ownerArgs,
         ).use { c ->
             while (c.moveToNext()) out.add(c.getString(0))
         }
         return out
+    }
+
+    /** Nombre d'actions non encore appliquées appartenant à un autre agent sur cet appareil. */
+    @Synchronized
+    fun pendingForOtherAgentCount(activeAgentId: String?): Int {
+        if (activeAgentId.isNullOrBlank()) return 0
+        helper.readableDatabase.query(
+            "SELECT COUNT(*) FROM sync_item WHERE status IN ('PENDING','SENT','FAILED','CONFLICT') " +
+                "AND superseded_by IS NULL AND agent_id IS NOT NULL AND agent_id != ?",
+            arrayOf(activeAgentId),
+        ).use { c ->
+            return if (c.moveToFirst()) c.getInt(0) else 0
+        }
     }
 
     /**
@@ -101,7 +214,7 @@ class SqliteSyncStore(context: Context) : SQLiteOpenHelper(context, "ctm_sync.db
      */
     @Synchronized
     fun hasUnappliedCustomerCreate(customerId: String): Boolean {
-        readableDatabase.rawQuery(
+        helper.readableDatabase.query(
             "SELECT status FROM sync_item WHERE action = ? AND entity_key = ? AND superseded_by IS NULL",
             arrayOf(SyncAction.CUSTOMER_CREATE.wire, customerId),
         ).use { c ->
@@ -112,13 +225,15 @@ class SqliteSyncStore(context: Context) : SQLiteOpenHelper(context, "ctm_sync.db
         return false
     }
 
-    /** Clients créés localement sur cet appareil (en attente ou déjà synchronisés). */
+    /** Clients créés localement par l'agent actif (en attente ou déjà synchronisés). */
     @Synchronized
-    fun localCustomers(limit: Int = 30): List<LocalCustomerRef> {
+    fun localCustomers(limit: Int = 50): List<LocalCustomerRef> {
         val out = ArrayList<LocalCustomerRef>()
-        readableDatabase.rawQuery(
-            "SELECT payload, status FROM sync_item WHERE action = ? AND superseded_by IS NULL ORDER BY local_id DESC LIMIT ?",
-            arrayOf(SyncAction.CUSTOMER_CREATE.wire, limit.toString()),
+        val (ownerClause, ownerArgs) = ownerFilterClause(currentAgentId())
+        val args: Array<Any> = arrayOf(SyncAction.CUSTOMER_CREATE.wire, *ownerArgs, limit)
+        helper.readableDatabase.query(
+            "SELECT payload, status FROM sync_item WHERE action = ? AND superseded_by IS NULL AND $ownerClause ORDER BY local_id DESC LIMIT ?",
+            args,
         ).use { c ->
             while (c.moveToNext()) {
                 val json = c.getString(0)
@@ -139,9 +254,11 @@ class SqliteSyncStore(context: Context) : SQLiteOpenHelper(context, "ctm_sync.db
     @Synchronized
     fun listAll(limit: Int = 100): List<SyncItem> {
         val out = ArrayList<SyncItem>()
-        readableDatabase.rawQuery(
-            "SELECT * FROM sync_item ORDER BY local_id DESC LIMIT ?",
-            arrayOf(limit.toString()),
+        val (ownerClause, ownerArgs) = ownerFilterClause(currentAgentId())
+        val args: Array<Any> = arrayOf(*ownerArgs, limit)
+        helper.readableDatabase.query(
+            "SELECT * FROM sync_item WHERE $ownerClause ORDER BY local_id DESC LIMIT ?",
+            args,
         ).use { c ->
             while (c.moveToNext()) out.add(readItem(c))
         }
@@ -151,7 +268,7 @@ class SqliteSyncStore(context: Context) : SQLiteOpenHelper(context, "ctm_sync.db
     @Synchronized
     fun nextLocalId(): Long {
         var maxId = System.currentTimeMillis()
-        readableDatabase.rawQuery("SELECT COALESCE(MAX(local_id), 0) FROM sync_item", null).use { c ->
+        helper.readableDatabase.query("SELECT COALESCE(MAX(local_id), 0) FROM sync_item", emptyArray()).use { c ->
             if (c.moveToFirst()) {
                 maxId = maxOf(maxId, c.getLong(0) + 1)
             }
@@ -178,4 +295,10 @@ class SqliteSyncStore(context: Context) : SQLiteOpenHelper(context, "ctm_sync.db
         attempts = c.getInt(c.getColumnIndexOrThrow("attempts")),
         supersededBy = text(c, "superseded_by"),
     )
+
+    private companion object {
+        const val LEGACY_DB_NAME = "ctm_sync.db"
+        const val ENCRYPTED_DB_NAME = "ctm_sync_enc.db"
+        const val DB_VERSION = 2
+    }
 }

@@ -9,7 +9,8 @@ sealed interface Route {
     @Serializable data class Simulator(val customerId: String? = null) : Route
     @Serializable data object NewCustomer : Route
     @Serializable data class Kyc(val customerId: String? = null) : Route
+    @Serializable data object Portfolio : Route
     @Serializable data object Delivery : Route
-    @Serializable data object Payment : Route
+    @Serializable data class Payment(val contractNumber: String? = null) : Route
     @Serializable data object SyncQueue : Route
 }

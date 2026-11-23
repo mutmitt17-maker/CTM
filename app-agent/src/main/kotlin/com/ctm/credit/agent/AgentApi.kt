@@ -24,6 +24,13 @@ interface AgentApi {
     /** action `verify_delivery_imei`. */
     suspend fun verifyDeliveryImei(deliveryId: String, scannedImei: String): ApiResult<ImeiCheck>
 
+    /** Envoi d'un fichier (photo JPEG ou signature PNG) dans le bucket privé `handover`. */
+    suspend fun uploadHandoverObject(
+        objectPath: String,
+        bytes: ByteArray,
+        contentType: String = "image/jpeg",
+    ): ApiResult<Unit> = ApiResult.Ok(Unit)
+
     /** action `record_handover_proof` : [signatureHash] = SHA-256 de la signature, [signerDevice] = empreinte de l'appareil. */
     suspend fun recordHandoverProof(
         deliveryId: String,

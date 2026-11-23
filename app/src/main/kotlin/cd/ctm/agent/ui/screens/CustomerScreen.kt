@@ -28,6 +28,7 @@ fun CustomerScreen(
     canMakeApplication: Boolean,
     onKyc: (customerId: String) -> Unit,
     onApplication: (customerId: String) -> Unit,
+    onQueued: () -> Unit = {},
     onBack: () -> Unit,
 ) {
     var firstName by rememberSaveable { mutableStateOf("") }
@@ -37,6 +38,10 @@ fun CustomerScreen(
     var address by rememberSaveable { mutableStateOf("") }
     var city by rememberSaveable { mutableStateOf("") }
     val state by vm.state.collectAsState()
+
+    androidx.compose.runtime.LaunchedEffect(state) {
+        if (state is CustomerViewModel.State.Queued) onQueued()
+    }
 
     CtmScreenContainer(
         title = stringResource(R.string.customer_title),

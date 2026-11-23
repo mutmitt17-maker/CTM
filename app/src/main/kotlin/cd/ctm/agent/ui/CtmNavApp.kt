@@ -49,6 +49,7 @@ import cd.ctm.agent.ui.components.AlertKind
 import cd.ctm.agent.ui.components.CtmAlertBanner
 import cd.ctm.agent.ui.components.CtmScreenContainer
 import cd.ctm.agent.ui.navigation.Route
+import cd.ctm.agent.ui.screens.AgentPortfolioScreen
 import cd.ctm.agent.ui.screens.CustomerScreen
 import cd.ctm.agent.ui.screens.DeliveryScreen
 import cd.ctm.agent.ui.screens.HomeScreen
@@ -108,7 +109,7 @@ fun CtmNavApp(container: AppContainer) {
             TopNavItem(R.string.nav_home, Icons.Outlined.Home, Route.Home),
             TopNavItem(R.string.nav_customer, Icons.Outlined.PersonAdd, Route.NewCustomer),
             TopNavItem(R.string.nav_delivery, Icons.Outlined.LocalShipping, Route.Delivery),
-            TopNavItem(R.string.nav_payment, Icons.Outlined.AccountBalanceWallet, Route.Payment),
+            TopNavItem(R.string.nav_payment, Icons.Outlined.AccountBalanceWallet, Route.Payment(null)),
             TopNavItem(R.string.nav_sync, Icons.Outlined.Sync, Route.SyncQueue, badgeCount = pending),
         )
     }
@@ -236,6 +237,7 @@ fun CtmNavApp(container: AppContainer) {
                                     policy = policy,
                                     vm = appVm,
                                     customerId = args.customerId,
+                                    onQueued = { container.refreshQueueState() },
                                     onBack = { navController.popBackStack() },
                                 )
                             }
@@ -252,6 +254,7 @@ fun CtmNavApp(container: AppContainer) {
                                 onApplication = { customerId ->
                                     navController.navigate(Route.Simulator(customerId))
                                 },
+                                onQueued = { container.refreshQueueState() },
                                 onBack = { navController.popBackStack() },
                             )
                         }
@@ -273,6 +276,26 @@ fun CtmNavApp(container: AppContainer) {
                             )
                         }
 
+                        composable<Route.Portfolio> {
+                            AgentPortfolioScreen(
+                                container = container,
+                                canMakeApplication = readyDash != null && readyDash.calculatorOk && readyDash.items.isNotEmpty(),
+                                onKyc = { customerId ->
+                                    kycVm.reset()
+                                    navController.navigate(Route.Kyc(customerId))
+                                },
+                                onApplication = { customerId ->
+                                    navController.navigate(Route.Simulator(customerId))
+                                },
+                                onDeliver = { navController.navigate(Route.Delivery) },
+                                onCollectPayment = { contractNumber ->
+                                    paymentVm.reset()
+                                    navController.navigate(Route.Payment(contractNumber))
+                                },
+                                onBack = { navController.popBackStack() },
+                            )
+                        }
+
                         composable<Route.Delivery> {
                             DeliveryScreen(
                                 container = container,
@@ -281,9 +304,12 @@ fun CtmNavApp(container: AppContainer) {
                             )
                         }
 
-                        composable<Route.Payment> {
+                        composable<Route.Payment> { entry ->
+                            val args = entry.toRoute<Route.Payment>()
                             PaymentScreen(
                                 vm = paymentVm,
+                                initialContractNumber = args.contractNumber,
+                                onQueued = { container.refreshQueueState() },
                                 onBack = { navController.popBackStack() },
                             )
                         }

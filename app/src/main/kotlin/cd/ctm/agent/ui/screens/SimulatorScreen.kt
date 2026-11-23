@@ -51,6 +51,7 @@ fun SimulatorScreen(
     policy: CreditPolicy,
     vm: ApplicationViewModel,
     customerId: String?,
+    onQueued: () -> Unit = {},
     onBack: () -> Unit,
 ) {
     var selectedItemId by rememberSaveable { mutableStateOf(items.firstOrNull()?.id) }
@@ -60,6 +61,10 @@ fun SimulatorScreen(
     val frequency = Frequency.fromWire(frequencyWire)
     val item = items.firstOrNull { it.id == selectedItemId } ?: items.firstOrNull()
     val state by vm.state.collectAsState()
+
+    androidx.compose.runtime.LaunchedEffect(state) {
+        if (state is ApplicationViewModel.State.Queued) onQueued()
+    }
 
     fun form() = ApplicationViewModel.Form(
         customerId = customerId.orEmpty(),

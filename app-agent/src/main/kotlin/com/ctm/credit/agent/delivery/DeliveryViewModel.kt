@@ -7,6 +7,8 @@ import com.ctm.credit.model.Imei
 import com.ctm.credit.security.DeviceFingerprint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -16,14 +18,12 @@ import kotlinx.coroutines.launch
  *
  * La livraison exige le serveur : ce sont des appels directs en ligne (pas des actions de
  * `sync_batch`, que le serveur refuserait avec `unknown_action`). Étapes dans l'ordre :
- *   1. [startDelivery]      : le serveur crée la livraison et renvoie son identifiant.
- *   2. [verifyImei]         : scan de l'IMEI, comparé à celui du téléphone réservé.
- *   3. [recordProof]        : photo de remise (chemin dans le bucket `handover`) + empreinte de la signature.
- *   4. [requestEnrollment]  : demande d'enrôlement MDM (verrouillage à distance du téléphone).
- *   5. [checkEnrollment]    : à répéter jusqu'à ce que le serveur confirme l'enrôlement (`enrolled`).
- *   6. [completeDelivery]   : clôture ; le serveur la refuse tant que 2, 3 et 5 ne sont pas confirmés.
- *
- * Les photos sont gardées dans PhotoVault et envoyées par le worker d'envoi ; ce ViewModel ne manipule que leurs chemins.
+ *   1. [startDelivery]        : le serveur crée la livraison et renvoie son identifiant.
+ *   2. [verifyImei]           : scan ou saisie de l'IMEI, comparé à celui du téléphone réservé.
+ *   3. [recordProofWithUpload]: upload photo JPEG + signature PNG vers bucket `handover`, puis `record_handover_proof`.
+ *   4. [requestEnrollment]    : demande d'enrôlement MDM (verrouillage à distance du téléphone).
+ *   5. [startEnrollmentPolling] / [checkEnrollment] : interroge `delivery.mdm_status` jusqu'à `enrolled`.
+ *   6. [completeDelivery]     : clôture ; le serveur la refuse tant que 2, 3 et 5 ne sont pas confirmés.
  */
 class DeliveryViewModel(
     private val api: AgentApi,
@@ -47,6 +47,20 @@ class DeliveryViewModel(
 
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state
+
+    private val _mdmPolling = MutableStateFlow(false)
+    val mdmPolling: StateFlow<Boolean> = _mdmPolling
+
+    private val _mdmPollTimedOut = MutableStateFlow(false)
+    val mdmPollTimedOut: StateFlow<Boolean> = _mdmPollTimedOut
+
+    private var pollJob: Job? = null
+
+    fun restore(savedState: State) {
+        if (_state.value == State.Idle && savedState !is State.Idle && savedState !is State.Working && savedState !is State.Completed && savedState !is State.Error) {
+            _state.value = savedState
+        }
+    }
 
     fun startDelivery(applicationId: String) {
         if (applicationId.isBlank()) { fail("ID de dossier manquant.", State.Idle); return }
@@ -90,8 +104,46 @@ class DeliveryViewModel(
         }
     }
 
+    /**
+     * Envoie d'abord la photo de remise (JPEG) et la signature (PNG) dans le bucket privé `handover`,
+     * puis enregistre la preuve via `record_handover_proof`.
+     */
+    fun recordProofWithUpload(
+        deliveryId: String,
+        photoObjectPath: String,
+        photoBytes: ByteArray,
+        signatureObjectPath: String,
+        signaturePngBytes: ByteArray,
+        signatureHash: String,
+    ) {
+        val previous = State.ImeiVerified(deliveryId, "")
+        if (photoObjectPath.isBlank() || photoBytes.isEmpty() || signaturePngBytes.isEmpty() || signatureHash.isBlank()) {
+            fail("Photo et signature obligatoires.", previous)
+            return
+        }
+        run(previous) {
+            when (val photoRes = api.uploadHandoverObject(photoObjectPath, photoBytes, "image/jpeg")) {
+                is ApiResult.Failure -> {
+                    fail(photoRes.message, previous)
+                    return@run
+                }
+                is ApiResult.Ok -> Unit
+            }
+            when (val sigRes = api.uploadHandoverObject(signatureObjectPath, signaturePngBytes, "image/png")) {
+                is ApiResult.Failure -> {
+                    fail(sigRes.message, previous)
+                    return@run
+                }
+                is ApiResult.Ok -> Unit
+            }
+            api.recordHandoverProof(deliveryId, photoObjectPath, signatureHash, deviceFingerprint.get())
+                .fold(previous) { _state.value = State.ProofRecorded(deliveryId) }
+        }
+    }
+
     /** Demande l'enrôlement MDM du téléphone remis (après la preuve de remise). */
     fun requestEnrollment(deliveryId: String) {
+        stopPolling()
         val previous = State.ProofRecorded(deliveryId)
         run(previous) {
             api.requestMdmEnrollment(deliveryId).fold(previous) { _state.value = State.EnrollmentRequested(deliveryId) }
@@ -99,8 +151,7 @@ class DeliveryViewModel(
     }
 
     /**
-     * Interroge le serveur sur l'enrôlement. À appeler toutes les quelques secondes (ou par un bouton « Vérifier »)
-     * tant que l'état est [State.EnrollmentRequested] : l'écran ne clignote pas, l'état ne change que si le statut change.
+     * Interroge le serveur une fois sur l'enrôlement.
      */
     fun checkEnrollment(deliveryId: String) {
         val waiting = State.EnrollmentRequested(deliveryId)
@@ -109,9 +160,64 @@ class DeliveryViewModel(
         }
     }
 
+    /**
+     * Démarre un polling automatique toutes les [intervalMs] ms jusqu'à confirmation `enrolled`,
+     * échec MDM (`failed` / `not_started`), ou dépassement de [maxAttempts].
+     */
+    fun startEnrollmentPolling(
+        deliveryId: String,
+        intervalMs: Long = 4_000L,
+        maxAttempts: Int = 22,
+    ) {
+        if (pollJob?.isActive == true) return
+        _mdmPollTimedOut.value = false
+        _mdmPolling.value = true
+        pollJob = scope.launch {
+            try {
+                for (attempt in 1..maxAttempts) {
+                    val current = _state.value
+                    if (current !is State.EnrollmentRequested || current.deliveryId != deliveryId) {
+                        return@launch
+                    }
+                    when (val res = api.mdmStatus(deliveryId)) {
+                        is ApiResult.Ok -> {
+                            onMdmStatus(deliveryId, res.value)
+                            if (res.value != MdmStatus.TOKEN_REQUESTED) {
+                                return@launch
+                            }
+                        }
+                        is ApiResult.Failure -> {
+                            fail(res.message, State.EnrollmentRequested(deliveryId))
+                            return@launch
+                        }
+                    }
+                    if (attempt < maxAttempts) {
+                        delay(intervalMs)
+                    }
+                }
+                _mdmPollTimedOut.value = true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                fail(e.message ?: "Erreur réseau pendant la vérification MDM.", State.EnrollmentRequested(deliveryId))
+            } finally {
+                _mdmPolling.value = false
+            }
+        }
+    }
+
+    fun stopPolling() {
+        pollJob?.cancel()
+        pollJob = null
+        _mdmPolling.value = false
+    }
+
     private fun onMdmStatus(deliveryId: String, status: MdmStatus) {
         when (status) {
-            MdmStatus.ENROLLED -> _state.value = State.Enrolled(deliveryId)
+            MdmStatus.ENROLLED -> {
+                _mdmPollTimedOut.value = false
+                _state.value = State.Enrolled(deliveryId)
+            }
             MdmStatus.TOKEN_REQUESTED -> _state.value = State.EnrollmentRequested(deliveryId)
             MdmStatus.FAILED ->
                 fail("L'enrôlement du téléphone a échoué. Relancez la demande d'enrôlement.", State.ProofRecorded(deliveryId))
@@ -121,15 +227,21 @@ class DeliveryViewModel(
     }
 
     fun completeDelivery(deliveryId: String) {
+        stopPolling()
         val previous = State.Enrolled(deliveryId)
         run(previous) {
             api.completeDelivery(deliveryId).fold(previous) { _state.value = State.Completed(deliveryId) }
         }
     }
 
-    fun reset() { _state.value = State.Idle }
+    fun reset() {
+        stopPolling()
+        _mdmPollTimedOut.value = false
+        _state.value = State.Idle
+    }
 
     private fun fail(message: String, previous: State) {
+        stopPolling()
         _state.value = State.Error(message, previous)
     }
 

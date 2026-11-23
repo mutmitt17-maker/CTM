@@ -1,11 +1,14 @@
 package cd.ctm.agent
 
 import android.content.Context
+import cd.ctm.agent.data.AndroidDatabaseKey
 import cd.ctm.agent.data.AndroidDeviceFingerprint
 import cd.ctm.agent.data.AndroidPhotoVault
 import cd.ctm.agent.data.AndroidTokenStore
 import cd.ctm.agent.data.CatalogueCache
+import cd.ctm.agent.data.DeliveryStateStore
 import cd.ctm.agent.data.SqliteSyncStore
+import cd.ctm.agent.sync.SyncWorker
 import com.ctm.credit.agent.AgentApi
 import com.ctm.credit.agent.AgentSession
 import com.ctm.credit.agent.ApiResult
@@ -36,6 +39,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 
 /**
@@ -44,17 +49,32 @@ import java.time.Instant
  * et l'état des flux lors des rotations d'écran.
  */
 class AppContainer(context: Context) {
+    private val appContext = context.applicationContext
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    val tokens: TokenStore = AndroidTokenStore(context)
-    val fingerprint = AndroidDeviceFingerprint(context)
-    val photoVault = AndroidPhotoVault(context)
+    private val databaseKey = AndroidDatabaseKey(appContext)
+    val tokenStore = AndroidTokenStore(appContext)
+    val tokens: TokenStore = tokenStore
+    val fingerprint = AndroidDeviceFingerprint(appContext)
+    val photoVault = AndroidPhotoVault(appContext)
     private val http = SupabaseHttp(HttpConfig(AppConfig.SUPABASE_URL, AppConfig.SUPABASE_ANON_KEY), tokens, fingerprint)
     val agentHttpApi = HttpAgentApi(http)
     val api: AgentApi = agentHttpApi
-    val syncStore = SqliteSyncStore(context)
+    val syncStore = SqliteSyncStore(appContext, databaseKey) { tokenStore.currentAgentId() }
     val syncEngine = SyncEngine(syncStore, HttpSyncApi(http), canSend = ::canSendSyncItem)
-    val cache = CatalogueCache(context)
+    val cache = CatalogueCache(appContext)
+    val deliveryStateStore = DeliveryStateStore(appContext)
+    private val syncMutex = Mutex()
+
+    data class SyncCycleReport(
+        val outcome: SyncOutcome,
+        val applied: Int,
+        val conflicts: Int,
+        val failed: Int,
+        val uploadedPhotos: Int,
+        val photoError: String? = null,
+        val fatalError: String? = null,
+    )
 
     sealed class DashboardState {
         data object Loading : DashboardState()
@@ -77,6 +97,9 @@ class AppContainer(context: Context) {
 
     private val _pendingPhotos = MutableStateFlow(0)
     val pendingPhotos: StateFlow<Int> = _pendingPhotos
+
+    private val _otherAgentPending = MutableStateFlow(0)
+    val otherAgentPending: StateFlow<Int> = _otherAgentPending
 
     private val _syncItems = MutableStateFlow<List<SyncItem>>(emptyList())
     val syncItems: StateFlow<List<SyncItem>> = _syncItems
@@ -107,8 +130,17 @@ class AppContainer(context: Context) {
     fun paymentViewModel(): PaymentViewModel =
         _paymentVm ?: PaymentViewModel(syncEngine, appScope).also { _paymentVm = it }
 
-    fun deliveryViewModel(): DeliveryViewModel =
-        _deliveryVm ?: DeliveryViewModel(api, fingerprint, appScope).also { _deliveryVm = it }
+    fun deliveryViewModel(): DeliveryViewModel {
+        val current = _deliveryVm
+        if (current != null) return current
+        return DeliveryViewModel(api, fingerprint, appScope).also { vm ->
+            deliveryStateStore.load()?.let { saved -> vm.restore(saved) }
+            appScope.launch {
+                vm.state.collect { st -> deliveryStateStore.save(st) }
+            }
+            _deliveryVm = vm
+        }
+    }
 
     fun applicationViewModel(policy: CreditPolicy): ApplicationViewModel {
         val current = _applicationVm
@@ -143,11 +175,15 @@ class AppContainer(context: Context) {
             val snapshot = cache.load()
             try {
                 val session = try {
-                    api.me()
+                    api.me().also { s ->
+                        if (s.userId.isNotBlank()) tokenStore.setCurrentAgentId(s.userId)
+                    }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    snapshot?.session ?: throw e
+                    snapshot?.session?.also { s ->
+                        if (s.userId.isNotBlank()) tokenStore.setCurrentAgentId(s.userId)
+                    } ?: throw e
                 }
 
                 var items: List<CatalogItem> = emptyList()
@@ -176,7 +212,7 @@ class AppContainer(context: Context) {
                     }
                 }
 
-                refreshQueueState()
+                updateQueueSnapshot()
                 _dashboard.value = DashboardState.Ready(
                     session = session,
                     items = items,
@@ -195,10 +231,18 @@ class AppContainer(context: Context) {
 
     fun refreshQueueState() {
         appScope.launch {
-            _pending.value = syncEngine.pendingCount()
-            _pendingPhotos.value = photoVault.pending().size
-            _syncItems.value = syncStore.listAll()
+            updateQueueSnapshot()
+            if (_pending.value > 0 || _pendingPhotos.value > 0) {
+                SyncWorker.enqueueImmediate(appContext)
+            }
         }
+    }
+
+    private fun updateQueueSnapshot() {
+        _pending.value = syncEngine.pendingCount()
+        _pendingPhotos.value = photoVault.pending().size
+        _otherAgentPending.value = syncStore.pendingForOtherAgentCount(tokenStore.currentAgentId())
+        _syncItems.value = syncStore.listAll()
     }
 
     fun syncNow(onNeedsLogin: () -> Unit) {
@@ -207,56 +251,80 @@ class AppContainer(context: Context) {
             _syncRunning.value = true
             _syncMessage.value = "Synchronisation en cours…"
             try {
-                var totalApplied = 0
-                var totalConflicts = 0
-                var totalFailed = 0
-                var uploadedPhotos = 0
-                var photoError: String? = null
-                var finalOutcome: SyncOutcome
-
-                while (true) {
-                    val report = try {
-                        syncEngine.runOnce()
-                    } catch (e: Exception) {
-                        _syncMessage.value = "Synchronisation impossible : ${e.message ?: "erreur inconnue"}."
-                        return@launch
-                    }
-                    totalApplied += report.applied
-                    totalConflicts += report.conflicts
-                    totalFailed += report.failed
-                    finalOutcome = report.outcome
-
-                    if (report.outcome != SyncOutcome.DONE) break
-
-                    val (uploadedNow, err) = uploadEligiblePhotos()
-                    uploadedPhotos += uploadedNow
-                    if (err != null) {
-                        photoError = err
-                        break
-                    }
-                    if (uploadedNow == 0) break
-                }
-
-                _pending.value = syncEngine.pendingCount()
-                _pendingPhotos.value = photoVault.pending().size
-                _syncItems.value = syncStore.listAll()
-
+                val report = runSyncCycle()
                 _syncMessage.value = when {
-                    finalOutcome == SyncOutcome.NEEDS_LOGIN -> "Session expirée. Reconnectez-vous."
-                    finalOutcome == SyncOutcome.RETRY_LATER -> "Pas de connexion au serveur. Réessayez plus tard."
-                    finalOutcome == SyncOutcome.REFUSED -> "Le serveur a refusé l'envoi. Contactez l'administrateur."
-                    finalOutcome == SyncOutcome.INCOMPLETE -> "Envoi interrompu par précaution. Réessayez."
-                    photoError != null -> "Actions envoyées : $totalApplied, photos envoyées : $uploadedPhotos. Échec photo : $photoError"
+                    report.fatalError != null -> "Synchronisation impossible : ${report.fatalError}."
+                    report.outcome == SyncOutcome.NEEDS_LOGIN -> "Session expirée. Reconnectez-vous."
+                    report.outcome == SyncOutcome.RETRY_LATER -> "Pas de connexion au serveur. Réessayez plus tard."
+                    report.outcome == SyncOutcome.REFUSED -> "Le serveur a refusé l'envoi. Contactez l'administrateur."
+                    report.outcome == SyncOutcome.INCOMPLETE -> "Envoi interrompu par précaution. Réessayez."
+                    report.photoError != null ->
+                        "Actions envoyées : ${report.applied}, photos envoyées : ${report.uploadedPhotos}. Échec photo : ${report.photoError}"
                     else -> {
-                        val photoSuffix = if (uploadedPhotos > 0) ", $uploadedPhotos photo(s) envoyée(s)" else ""
-                        "Terminé : $totalApplied envoyée(s)$photoSuffix, $totalConflicts en conflit, $totalFailed refusée(s)."
+                        val photoSuffix = if (report.uploadedPhotos > 0) ", ${report.uploadedPhotos} photo(s) envoyée(s)" else ""
+                        "Terminé : ${report.applied} envoyée(s)$photoSuffix, ${report.conflicts} en conflit, ${report.failed} refusée(s)."
                     }
                 }
-                if (finalOutcome == SyncOutcome.NEEDS_LOGIN) onNeedsLogin()
+                if (report.outcome == SyncOutcome.NEEDS_LOGIN) onNeedsLogin()
             } finally {
                 _syncRunning.value = false
             }
         }
+    }
+
+    /**
+     * Exécute un cycle complet (actions -> photos Storage éligibles -> actions suivantes),
+     * protégé par mutex afin que WorkManager et l'UI ne se concurrencent jamais.
+     */
+    suspend fun runSyncCycle(): SyncCycleReport = syncMutex.withLock {
+        var totalApplied = 0
+        var totalConflicts = 0
+        var totalFailed = 0
+        var uploadedPhotos = 0
+        var photoError: String? = null
+        var finalOutcome = SyncOutcome.DONE
+
+        while (true) {
+            val report = try {
+                syncEngine.runOnce()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                updateQueueSnapshot()
+                return@withLock SyncCycleReport(
+                    outcome = SyncOutcome.RETRY_LATER,
+                    applied = totalApplied,
+                    conflicts = totalConflicts,
+                    failed = totalFailed,
+                    uploadedPhotos = uploadedPhotos,
+                    fatalError = e.message ?: "erreur inconnue",
+                )
+            }
+            totalApplied += report.applied
+            totalConflicts += report.conflicts
+            totalFailed += report.failed
+            finalOutcome = report.outcome
+
+            if (report.outcome != SyncOutcome.DONE) break
+
+            val (uploadedNow, err) = uploadEligiblePhotos()
+            uploadedPhotos += uploadedNow
+            if (err != null) {
+                photoError = err
+                break
+            }
+            if (uploadedNow == 0) break
+        }
+
+        updateQueueSnapshot()
+        SyncCycleReport(
+            outcome = finalOutcome,
+            applied = totalApplied,
+            conflicts = totalConflicts,
+            failed = totalFailed,
+            uploadedPhotos = uploadedPhotos,
+            photoError = photoError,
+        )
     }
 
     /**
@@ -276,7 +344,6 @@ class AppContainer(context: Context) {
                     continue
                 }
             } else {
-                // Les autres buckets (ex. handover) seront envoyés lors du flux dédié ou étape suivante.
                 continue
             }
             val bytes = photoVault.readBytes(relativePath) ?: continue
@@ -301,22 +368,23 @@ class AppContainer(context: Context) {
             )
             syncStore.save(supersededOld)
             syncStore.save(replacement)
-            _pending.value = syncEngine.pendingCount()
-            _pendingPhotos.value = photoVault.pending().size
-            _syncItems.value = syncStore.listAll()
+            updateQueueSnapshot()
             _syncMessage.value = "Action corrigée et remise en file d'envoi."
+            SyncWorker.enqueueImmediate(appContext)
         }
     }
 
     fun logout() {
         tokens.clear()
         cache.clear()
+        deliveryStateStore.clear()
         _syncMessage.value = ""
         _dashboard.value = DashboardState.Loading
         _loginVm = null
         _customerVm = null
         _kycVm = null
         _paymentVm = null
+        _deliveryVm?.stopPolling()
         _deliveryVm = null
         _applicationVm = null
         _applicationPolicy = null

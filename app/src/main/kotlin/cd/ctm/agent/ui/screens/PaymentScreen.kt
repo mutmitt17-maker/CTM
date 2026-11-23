@@ -23,11 +23,22 @@ import cd.ctm.agent.ui.components.usd
 import com.ctm.credit.agent.payment.PaymentViewModel
 
 @Composable
-fun PaymentScreen(vm: PaymentViewModel, onBack: () -> Unit) {
-    var contract by rememberSaveable { mutableStateOf("CT-") }
+fun PaymentScreen(
+    vm: PaymentViewModel,
+    initialContractNumber: String? = null,
+    onQueued: () -> Unit = {},
+    onBack: () -> Unit,
+) {
+    var contract by rememberSaveable(initialContractNumber) {
+        mutableStateOf(initialContractNumber?.takeIf { it.isNotBlank() } ?: "CT-")
+    }
     var amount by rememberSaveable { mutableStateOf("") }
     var note by rememberSaveable { mutableStateOf("") }
     val state by vm.state.collectAsState()
+
+    androidx.compose.runtime.LaunchedEffect(state) {
+        if (state is PaymentViewModel.State.Queued) onQueued()
+    }
 
     CtmScreenContainer(
         title = stringResource(R.string.payment_title),

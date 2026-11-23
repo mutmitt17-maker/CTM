@@ -1,14 +1,21 @@
 package cd.ctm.agent.ui.screens
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,50 +23,81 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CameraAlt
+import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import cd.ctm.agent.AppContainer
 import cd.ctm.agent.R
+import cd.ctm.agent.data.ImageCompressor
 import cd.ctm.agent.ui.components.AlertKind
+import cd.ctm.agent.ui.components.BadgeTone
 import cd.ctm.agent.ui.components.CtmAlertBanner
+import cd.ctm.agent.ui.components.CtmBadge
 import cd.ctm.agent.ui.components.CtmCard
+import cd.ctm.agent.ui.components.CtmConfirmDialog
 import cd.ctm.agent.ui.components.CtmField
 import cd.ctm.agent.ui.components.CtmKeyValueRow
 import cd.ctm.agent.ui.components.CtmLoadingView
 import cd.ctm.agent.ui.components.CtmScreenContainer
 import cd.ctm.agent.ui.components.CtmStatusBadge
+import cd.ctm.agent.ui.components.ImeiScannerDialog
 import cd.ctm.agent.ui.components.usd
 import com.ctm.credit.agent.ApiResult
 import com.ctm.credit.agent.delivery.DeliveryViewModel
 import com.ctm.credit.http.ApprovedDeliveryApplication
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.io.File
 import java.security.MessageDigest
+import java.util.UUID
 
 @Composable
 fun DeliveryScreen(
@@ -68,48 +106,105 @@ fun DeliveryScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val uiScope = rememberCoroutineScope()
     val state by vm.state.collectAsState()
+    val mdmPolling by vm.mdmPolling.collectAsState()
+    val mdmTimedOut by vm.mdmPollTimedOut.collectAsState()
+
     var approvedApps by remember { mutableStateOf<List<ApprovedDeliveryApplication>>(emptyList()) }
     var loadingApps by remember { mutableStateOf(true) }
     var appsError by remember { mutableStateOf<String?>(null) }
     var applicationId by rememberSaveable { mutableStateOf("") }
     var imeiInput by rememberSaveable { mutableStateOf("") }
-    var photoPath by rememberSaveable { mutableStateOf("") }
+    var photoObjectPath by rememberSaveable { mutableStateOf("") }
+    var photoMessage by remember { mutableStateOf<String?>(null) }
+    var processingPhoto by remember { mutableStateOf(false) }
+    var showImeiScanner by rememberSaveable { mutableStateOf(false) }
+    var pendingCameraAction by rememberSaveable { mutableStateOf("") } // "imei_scan" or "handover_photo"
+    var confirmAbort by remember { mutableStateOf(false) }
+    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+
     val signaturePoints = remember { mutableStateListOf<List<Offset>>() }
     var currentStroke by remember { mutableStateOf<List<Offset>>(emptyList()) }
 
-    val currentDeliveryId = when (val s = state) {
-        is DeliveryViewModel.State.Started -> s.deliveryId
-        is DeliveryViewModel.State.ImeiVerified -> s.deliveryId
-        is DeliveryViewModel.State.ProofRecorded -> s.deliveryId
-        is DeliveryViewModel.State.EnrollmentRequested -> s.deliveryId
-        is DeliveryViewModel.State.Enrolled -> s.deliveryId
-        is DeliveryViewModel.State.Completed -> s.deliveryId
-        is DeliveryViewModel.State.Error -> when (val prev = s.previousState) {
-            is DeliveryViewModel.State.Started -> prev.deliveryId
-            is DeliveryViewModel.State.ImeiVerified -> prev.deliveryId
-            is DeliveryViewModel.State.ProofRecorded -> prev.deliveryId
-            is DeliveryViewModel.State.EnrollmentRequested -> prev.deliveryId
-            is DeliveryViewModel.State.Enrolled -> prev.deliveryId
-            else -> ""
-        }
+    val effectiveState = if (state is DeliveryViewModel.State.Error) {
+        (state as DeliveryViewModel.State.Error).previousState
+    } else {
+        state
+    }
+
+    val currentDeliveryId = when (effectiveState) {
+        is DeliveryViewModel.State.Started -> effectiveState.deliveryId
+        is DeliveryViewModel.State.ImeiVerified -> effectiveState.deliveryId
+        is DeliveryViewModel.State.ProofRecorded -> effectiveState.deliveryId
+        is DeliveryViewModel.State.EnrollmentRequested -> effectiveState.deliveryId
+        is DeliveryViewModel.State.Enrolled -> effectiveState.deliveryId
+        is DeliveryViewModel.State.Completed -> effectiveState.deliveryId
         else -> ""
     }
 
-    val photoPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia(),
-    ) { uri ->
-        if (uri != null && currentDeliveryId.isNotBlank()) {
-            val bucketPath = "$currentDeliveryId/proof.jpg"
-            try {
-                val target = container.photoVault.create(bucketPath)
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    target.outputStream().use { output -> input.copyTo(output) }
+    fun handlePhotoUri(uri: Uri) {
+        val did = currentDeliveryId.trim()
+        if (did.isBlank()) return
+        processingPhoto = true
+        photoMessage = null
+        uiScope.launch {
+            val newRelPath = "$did/${UUID.randomUUID()}_handover.jpg"
+            val oldRelPath = photoObjectPath
+            val ok = withContext(Dispatchers.IO) {
+                val destFile = container.photoVault.create("handover/$newRelPath")
+                val saved = ImageCompressor.compressUriToFile(context, uri, destFile)
+                if (saved && oldRelPath.isNotBlank() && oldRelPath != newRelPath) {
+                    container.photoVault.delete("handover/$oldRelPath")
+                } else if (!saved) {
+                    container.photoVault.delete("handover/$newRelPath")
                 }
-                photoPath = bucketPath
-            } catch (_: Exception) {
-                photoPath = bucketPath
+                deliveryCameraTempFile(context).delete()
+                saved
             }
+            processingPhoto = false
+            if (ok) {
+                photoObjectPath = newRelPath
+            } else {
+                photoMessage = context.getString(R.string.kyc_photo_compress_error)
+            }
+        }
+    }
+
+    val takePhotoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success) {
+            handlePhotoUri(deliveryCameraTempUri(context))
+        } else {
+            deliveryCameraTempFile(context).delete()
+        }
+    }
+
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) handlePhotoUri(uri)
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            when (pendingCameraAction) {
+                "imei_scan" -> showImeiScanner = true
+                "handover_photo" -> takePhotoLauncher.launch(deliveryCameraTempUri(context))
+            }
+        } else {
+            photoMessage = context.getString(R.string.kyc_camera_denied)
+        }
+        pendingCameraAction = ""
+    }
+
+    fun requestCameraFor(action: String) {
+        photoMessage = null
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            if (action == "imei_scan") showImeiScanner = true
+            else takePhotoLauncher.launch(deliveryCameraTempUri(context))
+        } else {
+            pendingCameraAction = action
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
 
@@ -125,16 +220,53 @@ fun DeliveryScreen(
         loadingApps = false
     }
 
-    val effectiveState = if (state is DeliveryViewModel.State.Error) {
-        (state as DeliveryViewModel.State.Error).previousState
-    } else {
-        state
+    // Démarre le polling automatique MDM dès que l'enrôlement est demandé (ou repris après redémarrage).
+    LaunchedEffect(effectiveState) {
+        if (effectiveState is DeliveryViewModel.State.EnrollmentRequested) {
+            vm.startEnrollmentPolling(effectiveState.deliveryId)
+        }
+        if (effectiveState is DeliveryViewModel.State.ProofRecorded && photoObjectPath.isNotBlank()) {
+            withContext(Dispatchers.IO) {
+                container.photoVault.delete("handover/$photoObjectPath")
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { vm.stopPolling() }
+    }
+
+    if (showImeiScanner) {
+        ImeiScannerDialog(
+            onDetected = { code ->
+                imeiInput = code
+                showImeiScanner = false
+            },
+            onDismiss = { showImeiScanner = false },
+        )
+    }
+
+    if (confirmAbort) {
+        CtmConfirmDialog(
+            title = stringResource(R.string.delivery_abort_title),
+            message = stringResource(R.string.delivery_abort_message),
+            danger = true,
+            onDismiss = { confirmAbort = false },
+            onConfirm = {
+                confirmAbort = false
+                vm.reset()
+                applicationId = ""
+                imeiInput = ""
+                photoObjectPath = ""
+                signaturePoints.clear()
+            },
+        )
     }
 
     CtmScreenContainer(
         title = stringResource(R.string.delivery_title),
         subtitle = stringResource(R.string.delivery_subtitle),
-        onBack = { vm.reset(); onBack() },
+        onBack = { vm.stopPolling(); onBack() },
     ) {
         if (state is DeliveryViewModel.State.Error) {
             CtmAlertBanner(AlertKind.ERROR, (state as DeliveryViewModel.State.Error).message)
@@ -207,6 +339,9 @@ fun DeliveryScreen(
                 CtmCard {
                     Text(stringResource(R.string.delivery_step2_title), style = MaterialTheme.typography.titleMedium)
                     CtmKeyValueRow("ID livraison", effectiveState.deliveryId, mono = true)
+                    if (photoMessage != null) {
+                        CtmAlertBanner(AlertKind.ERROR, photoMessage!!)
+                    }
                     CtmField(
                         label = stringResource(R.string.delivery_imei_label),
                         value = imeiInput,
@@ -214,6 +349,14 @@ fun DeliveryScreen(
                         keyboard = KeyboardType.Number,
                         testTag = "delivery_imei_input",
                     )
+                    OutlinedButton(
+                        onClick = { requestCameraFor("imei_scan") },
+                        modifier = Modifier.fillMaxWidth().testTag("delivery_scan_imei_button"),
+                    ) {
+                        Icon(Icons.Outlined.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.delivery_scan_imei))
+                    }
                     Button(
                         onClick = { vm.verifyImei(effectiveState.deliveryId, imeiInput.trim()) },
                         modifier = Modifier.fillMaxWidth().testTag("delivery_verify_imei_button"),
@@ -224,24 +367,81 @@ fun DeliveryScreen(
             }
 
             is DeliveryViewModel.State.ImeiVerified -> {
-                CtmCard {
-                    Text(stringResource(R.string.delivery_step3_title), style = MaterialTheme.typography.titleMedium)
-                    CtmKeyValueRow("IMEI vérifié", effectiveState.imei.ifBlank { imeiInput }, mono = true)
+                val photoFile = remember(photoObjectPath) {
+                    if (photoObjectPath.isBlank()) null else container.photoVault.fileFor("handover/$photoObjectPath")
+                }
+                val photoPreview by produceState<ImageBitmap?>(initialValue = null, key1 = photoFile?.absolutePath) {
+                    value = if (photoFile == null) {
+                        null
+                    } else {
+                        withContext(Dispatchers.IO) {
+                            val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
+                            BitmapFactory.decodeFile(photoFile.absolutePath, opts)?.asImageBitmap()
+                        }
+                    }
+                }
 
-                    OutlinedButton(
-                        onClick = {
-                            photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                        },
-                        modifier = Modifier.fillMaxWidth().testTag("delivery_pick_photo_button"),
+                CtmCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            stringResource(
-                                if (photoPath.isBlank()) R.string.delivery_choose_photo else R.string.delivery_replace_photo,
-                            ),
+                        Text(stringResource(R.string.delivery_step3_title), style = MaterialTheme.typography.titleMedium)
+                        CtmBadge(
+                            label = stringResource(if (photoFile != null) R.string.kyc_photo_ready else R.string.kyc_photo_missing),
+                            tone = if (photoFile != null) BadgeTone.OK else BadgeTone.WARN,
                         )
                     }
-                    if (photoPath.isNotBlank()) {
-                        CtmKeyValueRow("Fichier prêt", photoPath, mono = true)
+                    CtmKeyValueRow("IMEI vérifié", effectiveState.imei.ifBlank { imeiInput }, mono = true)
+
+                    if (photoMessage != null) {
+                        CtmAlertBanner(AlertKind.ERROR, photoMessage!!)
+                    }
+
+                    if (photoPreview != null) {
+                        Image(
+                            bitmap = photoPreview!!,
+                            contentDescription = stringResource(R.string.delivery_step3_title),
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(140.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp)),
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = { requestCameraFor("handover_photo") },
+                            enabled = !processingPhoto,
+                            modifier = Modifier.weight(1f).testTag("delivery_take_photo_button"),
+                        ) {
+                            Icon(Icons.Outlined.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(stringResource(R.string.delivery_take_photo), maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                photoMessage = null
+                                photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                            enabled = !processingPhoto,
+                            modifier = Modifier.weight(1f).testTag("delivery_pick_photo_button"),
+                        ) {
+                            Icon(Icons.Outlined.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                stringResource(
+                                    if (photoObjectPath.isBlank()) R.string.delivery_choose_photo else R.string.delivery_replace_photo,
+                                ),
+                                maxLines = 1,
+                            )
+                        }
                     }
 
                     Text(
@@ -261,6 +461,7 @@ fun DeliveryScreen(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .background(MaterialTheme.colorScheme.surface)
+                                .onSizeChanged { canvasSize = it }
                                 .pointerInput(Unit) {
                                     detectDragGestures(
                                         onDragStart = { start -> currentStroke = listOf(start) },
@@ -309,11 +510,34 @@ fun DeliveryScreen(
 
                     Button(
                         onClick = {
-                            val sigPayload = signaturePoints.flatten().joinToString(";") { "${it.x.toInt()},${it.y.toInt()}" }
-                            val hash = if (sigPayload.isBlank()) "" else sha256Hex("${effectiveState.deliveryId}:$sigPayload")
-                            vm.recordProof(effectiveState.deliveryId, photoPath, hash)
+                            uiScope.launch {
+                                val photoBytes = withContext(Dispatchers.IO) {
+                                    container.photoVault.readBytes("handover/$photoObjectPath")
+                                }
+                                if (photoBytes == null || photoBytes.isEmpty()) {
+                                    photoMessage = context.getString(R.string.kyc_photo_compress_error)
+                                    return@launch
+                                }
+                                val pngBytes = withContext(Dispatchers.Default) {
+                                    renderSignaturePng(
+                                        strokes = signaturePoints.toList(),
+                                        widthPx = canvasSize.width.toFloat(),
+                                        heightPx = canvasSize.height.toFloat(),
+                                    )
+                                }
+                                val hash = sha256Hex(pngBytes)
+                                val sigObjectPath = "${effectiveState.deliveryId}/${UUID.randomUUID()}_signature.png"
+                                vm.recordProofWithUpload(
+                                    deliveryId = effectiveState.deliveryId,
+                                    photoObjectPath = photoObjectPath,
+                                    photoBytes = photoBytes,
+                                    signatureObjectPath = sigObjectPath,
+                                    signaturePngBytes = pngBytes,
+                                    signatureHash = hash,
+                                )
+                            }
                         },
-                        enabled = photoPath.isNotBlank() && signaturePoints.isNotEmpty(),
+                        enabled = !processingPhoto && photoFile != null && signaturePoints.isNotEmpty() && state !is DeliveryViewModel.State.Working,
                         modifier = Modifier.fillMaxWidth().testTag("delivery_send_proof_button"),
                     ) {
                         Text(stringResource(R.string.delivery_send_proof))
@@ -341,12 +565,27 @@ fun DeliveryScreen(
             is DeliveryViewModel.State.EnrollmentRequested -> {
                 CtmCard {
                     Text(stringResource(R.string.delivery_step5_title), style = MaterialTheme.typography.titleMedium)
-                    CtmAlertBanner(
-                        AlertKind.INFO,
-                        stringResource(R.string.delivery_step5_desc),
-                    )
+                    CtmAlertBanner(AlertKind.INFO, stringResource(R.string.delivery_step5_desc))
+                    if (mdmPolling) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Text(
+                                stringResource(R.string.delivery_polling_active),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else if (mdmTimedOut) {
+                        CtmAlertBanner(AlertKind.WARN, stringResource(R.string.delivery_polling_timeout))
+                    }
                     Button(
-                        onClick = { vm.checkEnrollment(effectiveState.deliveryId) },
+                        onClick = {
+                            vm.checkEnrollment(effectiveState.deliveryId)
+                            vm.startEnrollmentPolling(effectiveState.deliveryId)
+                        },
                         modifier = Modifier.fillMaxWidth().testTag("delivery_check_mdm_button"),
                     ) {
                         Text(stringResource(R.string.delivery_check_mdm))
@@ -374,7 +613,7 @@ fun DeliveryScreen(
                         vm.reset()
                         applicationId = ""
                         imeiInput = ""
-                        photoPath = ""
+                        photoObjectPath = ""
                         signaturePoints.clear()
                     },
                     modifier = Modifier.fillMaxWidth().testTag("delivery_new_button"),
@@ -385,8 +624,57 @@ fun DeliveryScreen(
 
             is DeliveryViewModel.State.Error -> Unit
         }
+
+        if (effectiveState !is DeliveryViewModel.State.Idle &&
+            effectiveState !is DeliveryViewModel.State.Working &&
+            effectiveState !is DeliveryViewModel.State.Completed
+        ) {
+            TextButton(
+                onClick = { confirmAbort = true },
+                modifier = Modifier.fillMaxWidth().testTag("delivery_abort_button"),
+            ) {
+                Text(stringResource(R.string.delivery_abort_button), color = MaterialTheme.colorScheme.error)
+            }
+        }
     }
 }
 
-private fun sha256Hex(text: String): String =
-    MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+private fun renderSignaturePng(strokes: List<List<Offset>>, widthPx: Float, heightPx: Float): ByteArray {
+    val w = 800
+    val h = 360
+    val sx = if (widthPx > 1f) w / widthPx else 1f
+    val sy = if (heightPx > 1f) h / heightPx else 1f
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bmp)
+    canvas.drawColor(android.graphics.Color.WHITE)
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.rgb(17, 24, 39)
+        style = android.graphics.Paint.Style.STROKE
+        strokeWidth = 6f
+        strokeCap = android.graphics.Paint.Cap.ROUND
+        strokeJoin = android.graphics.Paint.Join.ROUND
+    }
+    strokes.forEach { pts ->
+        if (pts.size > 1) {
+            val path = android.graphics.Path()
+            path.moveTo(pts.first().x * sx, pts.first().y * sy)
+            for (i in 1 until pts.size) {
+                path.lineTo(pts[i].x * sx, pts[i].y * sy)
+            }
+            canvas.drawPath(path, paint)
+        }
+    }
+    val out = ByteArrayOutputStream()
+    bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+    bmp.recycle()
+    return out.toByteArray()
+}
+
+private fun sha256Hex(bytes: ByteArray): String =
+    MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+private fun deliveryCameraTempFile(context: Context): File =
+    File(context.filesDir, "camera_tmp/delivery_capture.jpg").apply { parentFile?.mkdirs() }
+
+private fun deliveryCameraTempUri(context: Context): Uri =
+    FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", deliveryCameraTempFile(context))
