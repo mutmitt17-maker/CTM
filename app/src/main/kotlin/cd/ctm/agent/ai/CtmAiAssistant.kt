@@ -3,18 +3,22 @@ package cd.ctm.agent.ai
 import android.graphics.Bitmap
 import android.util.Log
 import com.google.firebase.Firebase
+import com.google.firebase.ai.GenerativeModel
 import com.google.firebase.ai.ai
+import com.google.firebase.ai.type.GenerateContentResponse
 import com.google.firebase.ai.type.GenerativeBackend
 import com.google.firebase.ai.type.Schema
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.generationConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 
 private const val TAG = "CtmAiAssistant"
-private const val MODEL_NAME = "gemini-3.8-flash"
+private const val PRIMARY_MODEL_NAME = "gemini-3.8-flash"
+private const val FALLBACK_MODEL_NAME = "gemini-3.5-flash-lite"
 private const val TIMEOUT_MS = 60_000L
 
 sealed interface AiOutcome<out T> {
@@ -65,7 +69,8 @@ data class PortfolioBriefResult(
 )
 
 /**
- * Assistant IA terrain CTM propulsé par Firebase AI Logic (Gemini 3.8 Flash).
+ * Assistant IA terrain CTM propulsé par Firebase AI Logic (Gemini 3.8 Flash avec bascule
+ * automatique sur Gemini 3.5 Flash-Lite en cas de pic de demande temporaire).
  *
  * Règle métier : l'IA assiste la qualité, l'OCR de pré-remplissage, la dictée vocale
  * et la priorisation de tournée. Elle ne remplace jamais `compute_offer()`, `worker-biometrics`
@@ -73,117 +78,111 @@ data class PortfolioBriefResult(
  */
 class CtmAiAssistant {
 
+    private class ModelPair(factory: (String) -> GenerativeModel) {
+        val primary: GenerativeModel by lazy { factory(PRIMARY_MODEL_NAME) }
+        val fallback: GenerativeModel by lazy { factory(FALLBACK_MODEL_NAME) }
+    }
+
     private val ai by lazy { Firebase.ai(backend = GenerativeBackend.googleAI()) }
 
-    private val kycIdModel by lazy {
-        val schema = Schema.obj(
-            properties = mapOf(
-                "qualityOk" to Schema.boolean("True if ID document photo is sharp, well-lit, and readable"),
-                "qualityScore" to Schema.integer("Photo clarity score between 0 and 100"),
-                "qualityFeedback" to Schema.string("Short actionable French feedback for the field agent"),
-                "fullName" to Schema.string("Full name visible on the ID document or empty string"),
-                "birthDate" to Schema.string("Birth date formatted strictly YYYY-MM-DD or empty string"),
-                "documentNumber" to Schema.string("Document / card number visible or empty string"),
-                "commune" to Schema.string("Commune if visible on the ID document or empty string"),
-                "neighborhood" to Schema.string("Neighborhood/quartier if visible or empty string"),
-                "detectedDocType" to Schema.enumeration(
-                    values = listOf("national_id", "voter_card", "passport", "driver_license", "unknown"),
-                    description = "Detected DRC document type",
+    private fun jsonModel(schema: Schema): (String) -> GenerativeModel = { modelName ->
+        ai.generativeModel(
+            modelName = modelName,
+            generationConfig = generationConfig {
+                responseMimeType = "application/json"
+                responseSchema = schema
+            },
+        )
+    }
+
+    private val kycIdModels = ModelPair(
+        jsonModel(
+            Schema.obj(
+                properties = mapOf(
+                    "qualityOk" to Schema.boolean("True if ID document photo is sharp, well-lit, and readable"),
+                    "qualityScore" to Schema.integer("Photo clarity score between 0 and 100"),
+                    "qualityFeedback" to Schema.string("Short actionable French feedback for the field agent"),
+                    "fullName" to Schema.string("Full name visible on the ID document or empty string"),
+                    "birthDate" to Schema.string("Birth date formatted strictly YYYY-MM-DD or empty string"),
+                    "documentNumber" to Schema.string("Document / card number visible or empty string"),
+                    "commune" to Schema.string("Commune if visible on the ID document or empty string"),
+                    "neighborhood" to Schema.string("Neighborhood/quartier if visible or empty string"),
+                    "detectedDocType" to Schema.enumeration(
+                        values = listOf("national_id", "voter_card", "passport", "driver_license", "unknown"),
+                        description = "Detected DRC document type",
+                    ),
                 ),
             ),
-        )
-        ai.generativeModel(
-            modelName = MODEL_NAME,
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                responseSchema = schema
-            },
-        )
-    }
+        ),
+    )
 
-    private val selfieQualityModel by lazy {
-        val schema = Schema.obj(
-            properties = mapOf(
-                "qualityOk" to Schema.boolean("True if one face is clearly visible, centered, well-lit, unblurred"),
-                "qualityScore" to Schema.integer("Selfie quality score 0..100"),
-                "qualityFeedback" to Schema.string("Short French advice to keep or retake the selfie"),
+    private val selfieQualityModels = ModelPair(
+        jsonModel(
+            Schema.obj(
+                properties = mapOf(
+                    "qualityOk" to Schema.boolean("True if one face is clearly visible, centered, well-lit, unblurred"),
+                    "qualityScore" to Schema.integer("Selfie quality score 0..100"),
+                    "qualityFeedback" to Schema.string("Short French advice to keep or retake the selfie"),
+                ),
             ),
-        )
-        ai.generativeModel(
-            modelName = MODEL_NAME,
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                responseSchema = schema
-            },
-        )
-    }
+        ),
+    )
 
-    private val voiceCustomerModel by lazy {
-        val schema = Schema.obj(
-            properties = mapOf(
-                "firstName" to Schema.string("Customer first name or empty string"),
-                "lastName" to Schema.string("Customer last/family name or empty string"),
-                "phoneNumber" to Schema.string("DRC phone normalized to +243XXXXXXXXX when present, or empty string"),
-                "nationalId" to Schema.string("ID number if mentioned, or empty string"),
-                "address" to Schema.string("Street/avenue/commune address if mentioned, or empty string"),
-                "city" to Schema.string("City such as Kinshasa, Lubumbashi, Goma, or empty string"),
+    private val voiceCustomerModels = ModelPair(
+        jsonModel(
+            Schema.obj(
+                properties = mapOf(
+                    "firstName" to Schema.string("Customer first name or empty string"),
+                    "lastName" to Schema.string("Customer last/family name or empty string"),
+                    "phoneNumber" to Schema.string("DRC phone normalized to +243XXXXXXXXX when present, or empty string"),
+                    "nationalId" to Schema.string("ID number if mentioned, or empty string"),
+                    "address" to Schema.string("Street/avenue/commune address if mentioned, or empty string"),
+                    "city" to Schema.string("City such as Kinshasa, Lubumbashi, Goma, or empty string"),
+                ),
             ),
-        )
-        ai.generativeModel(
-            modelName = MODEL_NAME,
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                responseSchema = schema
-            },
-        )
-    }
+        ),
+    )
 
-    private val portfolioModel by lazy {
-        val itemSchema = Schema.obj(
-            properties = mapOf(
-                "priority" to Schema.enumeration(listOf("URGENT", "HIGH", "NORMAL")),
-                "category" to Schema.enumeration(listOf("DELIVERY", "COLLECTION", "KYC", "SYNC")),
-                "title" to Schema.string("Short French title naming customer or contract"),
-                "reason" to Schema.string("Short French rationale why this comes first"),
-                "targetId" to Schema.string("Matching customerId, contractNumber, or applicationId if known"),
-                "suggestedAction" to Schema.enumeration(listOf("DELIVER", "COLLECT", "KYC", "NONE")),
+    private val portfolioModels = ModelPair(
+        jsonModel(
+            Schema.obj(
+                properties = mapOf(
+                    "headline" to Schema.string("One-line French tour focus summary"),
+                    "summary" to Schema.string("2-sentence practical French briefing for the agent"),
+                    "items" to Schema.array(
+                        Schema.obj(
+                            properties = mapOf(
+                                "priority" to Schema.enumeration(listOf("URGENT", "HIGH", "NORMAL")),
+                                "category" to Schema.enumeration(listOf("DELIVERY", "COLLECTION", "KYC", "SYNC")),
+                                "title" to Schema.string("Short French title naming customer or contract"),
+                                "reason" to Schema.string("Short French rationale why this comes first"),
+                                "targetId" to Schema.string("Matching customerId, contractNumber, or applicationId if known"),
+                                "suggestedAction" to Schema.enumeration(listOf("DELIVER", "COLLECT", "KYC", "NONE")),
+                            ),
+                        ),
+                        "Top up to 5 prioritized actions",
+                    ),
+                ),
             ),
-        )
-        val schema = Schema.obj(
-            properties = mapOf(
-                "headline" to Schema.string("One-line French tour focus summary"),
-                "summary" to Schema.string("2-sentence practical French briefing for the agent"),
-                "items" to Schema.array(itemSchema, "Top up to 5 prioritized actions"),
-            ),
-        )
-        ai.generativeModel(
-            modelName = MODEL_NAME,
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                responseSchema = schema
-            },
-        )
-    }
+        ),
+    )
 
-    private val pingModel by lazy {
-        ai.generativeModel(modelName = MODEL_NAME)
+    private val pingModels = ModelPair { modelName ->
+        ai.generativeModel(modelName = modelName)
     }
 
     suspend fun analyzeKycIdPhoto(bitmap: Bitmap, expectedDocType: String): AiOutcome<KycIdAnalysisResult> =
         runSafe {
             val scaled = scaleForAi(bitmap)
-            val response = withTimeout(TIMEOUT_MS) {
-                kycIdModel.generateContent(
-                    content {
-                        image(scaled)
-                        text(
-                            "Tu aides un agent de terrain CTM en RDC à vérifier la qualité d'une photo de pièce d'identité ($expectedDocType) " +
-                                "et à pré-remplir les champs textuels lisibles. Évalue si la photo est nette, sans reflet bloquant, non coupée " +
-                                "et lisible pour une vérification serveur ultérieure. N'invente jamais une date ou un nom illisible : mets une chaîne vide.",
-                        )
-                    },
+            val prompt = content {
+                image(scaled)
+                text(
+                    "Tu aides un agent de terrain CTM en RDC à vérifier la qualité d'une photo de pièce d'identité ($expectedDocType) " +
+                        "et à pré-remplir les champs textuels lisibles. Évalue si la photo est nette, sans reflet bloquant, non coupée " +
+                        "et lisible pour une vérification serveur ultérieure. N'invente jamais une date ou un nom illisible : mets une chaîne vide.",
                 )
             }
+            val (response, _) = generateWithFallback(kycIdModels) { it.generateContent(prompt) }
             val json = JSONObject(response.text ?: error("Réponse IA vide."))
             AiOutcome.Success(
                 KycIdAnalysisResult(
@@ -203,17 +202,14 @@ class CtmAiAssistant {
     suspend fun analyzeKycSelfieQuality(bitmap: Bitmap): AiOutcome<KycSelfieAnalysisResult> =
         runSafe {
             val scaled = scaleForAi(bitmap)
-            val response = withTimeout(TIMEOUT_MS) {
-                selfieQualityModel.generateContent(
-                    content {
-                        image(scaled)
-                        text(
-                            "Tu vérifies la qualité technique d'un selfie client avant envoi au serveur KYC (net, visage entier bien éclairé, " +
-                                "une seule personne, pas de contre-jour ni lunettes sombres). Donne un retour court en français.",
-                        )
-                    },
+            val prompt = content {
+                image(scaled)
+                text(
+                    "Tu vérifies la qualité technique d'un selfie client avant envoi au serveur KYC (net, visage entier bien éclairé, " +
+                        "une seule personne, pas de contre-jour ni lunettes sombres). Donne un retour court en français.",
                 )
             }
+            val (response, _) = generateWithFallback(selfieQualityModels) { it.generateContent(prompt) }
             val json = JSONObject(response.text ?: error("Réponse IA vide."))
             AiOutcome.Success(
                 KycSelfieAnalysisResult(
@@ -228,13 +224,10 @@ class CtmAiAssistant {
         runSafe {
             val clean = transcript.trim()
             if (clean.isBlank()) return@runSafe AiOutcome.Error("Dictez ou saisissez d'abord le texte du client.")
-            val response = withTimeout(TIMEOUT_MS) {
-                voiceCustomerModel.generateContent(
-                    "Extrais les informations client de cette dictée terrain en RDC (français / contexte congolais). " +
-                        "Normalise le numéro de téléphone au format +243XXXXXXXXX si 9 chiffres après 0 ou 243 sont présents. " +
-                        "Laisse vide tout champ absent.\nDictée : \"$clean\"",
-                )
-            }
+            val prompt = "Extrais les informations client de cette dictée terrain en RDC (français / contexte congolais). " +
+                "Normalise le numéro de téléphone au format +243XXXXXXXXX si 9 chiffres après 0 ou 243 sont présents. " +
+                "Laisse vide tout champ absent.\nDictée : \"$clean\""
+            val (response, _) = generateWithFallback(voiceCustomerModels) { it.generateContent(prompt) }
             val json = JSONObject(response.text ?: error("Réponse IA vide."))
             AiOutcome.Success(
                 VoiceCustomerExtraction(
@@ -250,15 +243,12 @@ class CtmAiAssistant {
 
     suspend fun prioritizePortfolio(portfolioSnapshot: String): AiOutcome<PortfolioBriefResult> =
         runSafe {
-            val response = withTimeout(TIMEOUT_MS) {
-                portfolioModel.generateContent(
-                    "Tu es l'assistant de tournée d'un agent CTM Crédit Téléphone (USD). " +
-                        "Analyse ces données réelles du portefeuille et classe jusqu'à 5 actions prioritaires pour aujourd'hui : " +
-                        "1) dossiers 'approved' à livrer rapidement, 2) contrats 'defaulted'/'breached' ou actifs à encaisser, " +
-                        "3) clients hors-ligne / KYC à compléter ou dossiers 'pending_review'. Réponds uniquement à partir des données fournies.\n\n" +
-                        portfolioSnapshot,
-                )
-            }
+            val prompt = "Tu es l'assistant de tournée d'un agent CTM Crédit Téléphone (USD). " +
+                "Analyse ces données réelles du portefeuille et classe jusqu'à 5 actions prioritaires pour aujourd'hui : " +
+                "1) dossiers 'approved' à livrer rapidement, 2) contrats 'defaulted'/'breached' ou actifs à encaisser, " +
+                "3) clients hors-ligne / KYC à compléter ou dossiers 'pending_review'. Réponds uniquement à partir des données fournies.\n\n" +
+                portfolioSnapshot
+            val (response, _) = generateWithFallback(portfolioModels) { it.generateContent(prompt) }
             val json = JSONObject(response.text ?: error("Réponse IA vide."))
             val arr = json.optJSONArray("items")
             val items = buildList {
@@ -288,12 +278,44 @@ class CtmAiAssistant {
         }
 
     suspend fun probeConnection(): AiOutcome<String> = runSafe {
-        val response = withTimeout(TIMEOUT_MS) {
-            pingModel.generateContent("Réponds uniquement par : OK")
+        val (response, usedModel) = generateWithFallback(pingModels) { model ->
+            model.generateContent("Réponds uniquement par : OK")
         }
         val text = response.text?.trim().orEmpty()
-        if (text.isBlank()) AiOutcome.Error("Réponse Gemini vide.")
-        else AiOutcome.Success(text)
+        if (text.isBlank()) {
+            AiOutcome.Error("Réponse Gemini vide.")
+        } else {
+            val suffix = if (usedModel == FALLBACK_MODEL_NAME) " · modèle de secours $usedModel" else " · $usedModel"
+            AiOutcome.Success("$text$suffix")
+        }
+    }
+
+    private suspend fun generateWithFallback(
+        pair: ModelPair,
+        invoke: suspend (GenerativeModel) -> GenerateContentResponse,
+    ): Pair<GenerateContentResponse, String> = withTimeout(TIMEOUT_MS) {
+        try {
+            invoke(pair.primary) to PRIMARY_MODEL_NAME
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (!isTransientCapacityError(e)) throw e
+            Log.w(TAG, "$PRIMARY_MODEL_NAME temporarily saturated; switching to $FALLBACK_MODEL_NAME", e)
+            delay(500L)
+            invoke(pair.fallback) to FALLBACK_MODEL_NAME
+        }
+    }
+
+    private fun isTransientCapacityError(e: Exception): Boolean {
+        val msg = e.message.orEmpty().lowercase()
+        return "high demand" in msg ||
+            "overloaded" in msg ||
+            "unavailable" in msg ||
+            "503" in msg ||
+            "temporarily" in msg ||
+            "try again" in msg ||
+            "resource exhausted" in msg ||
+            "429" in msg
     }
 
     private inline fun <T> runSafe(block: () -> AiOutcome<T>): AiOutcome<T> = try {
@@ -305,7 +327,21 @@ class CtmAiAssistant {
         throw e
     } catch (e: Exception) {
         Log.e(TAG, "Firebase AI generation failed", e)
-        AiOutcome.Error(e.localizedMessage ?: "Service IA indisponible pour le moment.")
+        AiOutcome.Error(formatFriendlyError(e))
+    }
+
+    private fun formatFriendlyError(e: Exception): String {
+        val raw = e.localizedMessage?.trim().orEmpty()
+        val lower = raw.lowercase()
+        return when {
+            "high demand" in lower || "overloaded" in lower || "503" in lower || "unavailable" in lower ->
+                "Pic de charge temporaire sur les serveurs Gemini ($PRIMARY_MODEL_NAME et $FALLBACK_MODEL_NAME). " +
+                    "App Check est bien connecté ; réessayez dans quelques secondes."
+            "429" in lower || "quota" in lower || "resource exhausted" in lower ->
+                "Quota temporaire Gemini atteint. Patienter quelques instants avant de relancer l'assistant IA."
+            raw.isNotBlank() -> raw
+            else -> "Service IA indisponible pour le moment."
+        }
     }
 
     private fun scaleForAi(src: Bitmap, maxSide: Int = 1280): Bitmap {
