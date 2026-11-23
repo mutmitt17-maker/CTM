@@ -1,0 +1,59 @@
+name: Android App Complete
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "app/**"
+      - "core-model/**"
+      - "core-network/**"
+      - "core-security/**"
+      - "app-agent/**"
+      - "agent-http/**"
+      - "gradle/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - ".github/workflows/android-app-complete.yml"
+
+jobs:
+  build-apk:
+    name: Application agent complète (APK de test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Prépare le SDK Android (API 36)
+        run: |
+          SDKMANAGER="$(ls -d "${ANDROID_HOME}/cmdline-tools/"*/bin/sdkmanager | sort -V | tail -n 1)"
+          yes 2>/dev/null | "$SDKMANAGER" --sdk_root="${ANDROID_HOME}" --licenses > /dev/null || true
+          "$SDKMANAGER" --sdk_root="${ANDROID_HOME}" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Crée la clé de signature de test
+        run: |
+          keytool -genkeypair -v -keystore debug.keystore \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Fabrique l’APK
+        run: gradle :app:assembleDebug --no-daemon --console=plain --stacktrace 2>&1 | tee build.log
+
+      - name: Affiche les erreurs
+        if: failure()
+        run: grep -E "^e: " build.log || true
+
+      - name: Garde l’APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctm-app-complete-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
