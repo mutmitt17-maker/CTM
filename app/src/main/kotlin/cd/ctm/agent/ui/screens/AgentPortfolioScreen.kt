@@ -4,8 +4,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -20,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -30,6 +33,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cd.ctm.agent.AppContainer
 import cd.ctm.agent.R
+import cd.ctm.agent.ai.AiOutcome
+import cd.ctm.agent.ai.PortfolioBriefResult
 import cd.ctm.agent.ui.components.AlertKind
 import cd.ctm.agent.ui.components.BadgeTone
 import cd.ctm.agent.ui.components.CtmAlertBanner
@@ -43,12 +48,16 @@ import cd.ctm.agent.ui.components.CtmScreenContainer
 import cd.ctm.agent.ui.components.CtmStatusBadge
 import cd.ctm.agent.ui.components.fmtDay
 import cd.ctm.agent.ui.components.usd
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import com.ctm.credit.agent.ApiResult
 import com.ctm.credit.http.AgentApplicationSummary
 import com.ctm.credit.http.AgentContractSummary
 import com.ctm.credit.network.SyncAction
 import com.ctm.credit.network.SyncStatus
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private data class PortfolioCustomerRow(
@@ -71,6 +80,7 @@ fun AgentPortfolioScreen(
     onCollectPayment: (String) -> Unit,
     onBack: () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var search by rememberSaveable { mutableStateOf("") }
     var reloadKey by rememberSaveable { mutableIntStateOf(0) }
@@ -80,6 +90,10 @@ fun AgentPortfolioScreen(
     var customers by remember { mutableStateOf<List<PortfolioCustomerRow>>(emptyList()) }
     var applications by remember { mutableStateOf<List<AgentApplicationSummary>>(emptyList()) }
     var contracts by remember { mutableStateOf<List<AgentContractSummary>>(emptyList()) }
+
+    var aiLoading by remember { mutableStateOf(false) }
+    var aiBrief by remember { mutableStateOf<PortfolioBriefResult?>(null) }
+    var aiError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(reloadKey) {
         loading = true
@@ -125,7 +139,17 @@ fun AgentPortfolioScreen(
         }
 
         customers = mergedCustomers.values.toList()
-        applications = if (remoteAppRes is ApiResult.Ok) remoteAppRes.value else emptyList()
+        applications = if (remoteAppRes is ApiResult.Ok) {
+            val agentId = container.tokenStore.currentAgentId().orEmpty()
+            if (agentId.isNotBlank()) {
+                withContext(Dispatchers.IO) {
+                    container.statusTracker.detectTransitions(agentId, remoteAppRes.value)
+                }
+            }
+            remoteAppRes.value
+        } else {
+            emptyList()
+        }
         contracts = if (remoteContractRes is ApiResult.Ok) remoteContractRes.value else emptyList()
         loading = false
     }
@@ -177,6 +201,125 @@ fun AgentPortfolioScreen(
         if (loading) {
             CtmLoadingView(stringResource(R.string.loading_default))
         } else {
+            val approvedCount = applications.count { it.status == "approved" }
+            val overdueCount = contracts.count { it.status == "defaulted" || it.status == "breached" }
+            val pendingLocalCount = customers.count { it.syncStatus != null || it.hasPendingKyc }
+
+            CtmCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.portfolio_ai_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    CtmBadge(
+                        label = stringResource(R.string.portfolio_ai_counts, approvedCount, overdueCount, pendingLocalCount),
+                        tone = if (approvedCount > 0 || overdueCount > 0) BadgeTone.INFO else BadgeTone.NEUTRAL,
+                    )
+                }
+
+                if (aiBrief != null) {
+                    Text(
+                        text = aiBrief!!.headline,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    if (aiBrief!!.summary.isNotBlank()) {
+                        Text(
+                            text = aiBrief!!.summary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    aiBrief!!.items.forEach { item ->
+                        val tone = when (item.priority) {
+                            "URGENT" -> BadgeTone.BAD
+                            "HIGH" -> BadgeTone.WARN
+                            else -> BadgeTone.INFO
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = item.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            CtmBadge(item.priority, tone)
+                        }
+                        if (item.reason.isNotBlank()) {
+                            Text(
+                                text = item.reason,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        when (item.suggestedAction) {
+                            "DELIVER" -> OutlinedButton(onClick = onDeliver, modifier = Modifier.fillMaxWidth()) {
+                                Text(stringResource(R.string.portfolio_action_deliver))
+                            }
+                            "COLLECT" -> if (item.targetId.startsWith("CT-")) {
+                                OutlinedButton(
+                                    onClick = { onCollectPayment(item.targetId) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text("${stringResource(R.string.portfolio_action_collect)} (${item.targetId})")
+                                }
+                            }
+                            "KYC" -> if (item.targetId.isNotBlank()) {
+                                OutlinedButton(
+                                    onClick = { onKyc(item.targetId) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(stringResource(R.string.portfolio_action_kyc))
+                                }
+                            }
+                        }
+                    }
+                } else if (aiError != null) {
+                    CtmAlertBanner(AlertKind.WARN, aiError!!)
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        aiLoading = true
+                        aiError = null
+                        val snapshot = buildPortfolioSnapshot(customers, applications, contracts)
+                        scope.launch {
+                            when (val res = container.aiAssistant.prioritizePortfolio(snapshot)) {
+                                is AiOutcome.Success -> aiBrief = res.data
+                                is AiOutcome.Error -> aiError = res.message
+                            }
+                            aiLoading = false
+                        }
+                    },
+                    enabled = !aiLoading && (customers.isNotEmpty() || applications.isNotEmpty() || contracts.isNotEmpty()),
+                    modifier = Modifier.fillMaxWidth().testTag("portfolio_ai_prioritize_button"),
+                ) {
+                    if (aiLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.portfolio_ai_loading))
+                    } else {
+                        Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            stringResource(
+                                if (aiBrief == null) R.string.portfolio_ai_button else R.string.portfolio_ai_refresh_button,
+                            ),
+                        )
+                    }
+                }
+            }
+
             when (selectedTab) {
                 0 -> {
                     val filtered = customers.filter {
@@ -333,4 +476,23 @@ private fun translateDecisionReason(reason: String): String = when (reason) {
     "biometrics_not_verified" -> "Biométrie à vérifier manuellement"
     "auto_approved" -> "Approuvé automatiquement"
     else -> reason
+}
+
+private fun buildPortfolioSnapshot(
+    customers: List<PortfolioCustomerRow>,
+    applications: List<AgentApplicationSummary>,
+    contracts: List<AgentContractSummary>,
+): String = buildString {
+    appendLine("CLIENTS (${customers.size}):")
+    customers.take(20).forEach {
+        appendLine("- id=${it.id} nom=${it.fullName} sync=${it.syncStatus ?: "synced"} kycEnFile=${it.hasPendingKyc}")
+    }
+    appendLine("DOSSIERS (${applications.size}):")
+    applications.take(20).forEach {
+        appendLine("- appId=${it.id} client=${it.customerName ?: "?"} statut=${it.status} montant=${it.financedAmount} motif=${it.decisionReason ?: "-"}")
+    }
+    appendLine("CONTRATS (${contracts.size}):")
+    contracts.take(20).forEach {
+        appendLine("- num=${it.contractNumber} client=${it.customerName ?: "?"} statut=${it.status} solde=${it.outstandingBalance}")
+    }
 }

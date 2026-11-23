@@ -2,6 +2,7 @@ package com.ctm.credit.agent.delivery
 
 import com.ctm.credit.agent.AgentApi
 import com.ctm.credit.agent.ApiResult
+import com.ctm.credit.agent.MdmEnrollmentDetails
 import com.ctm.credit.agent.MdmStatus
 import com.ctm.credit.model.Imei
 import com.ctm.credit.security.DeviceFingerprint
@@ -53,6 +54,9 @@ class DeliveryViewModel(
 
     private val _mdmPollTimedOut = MutableStateFlow(false)
     val mdmPollTimedOut: StateFlow<Boolean> = _mdmPollTimedOut
+
+    private val _mdmEnrollmentDetails = MutableStateFlow<MdmEnrollmentDetails?>(null)
+    val mdmEnrollmentDetails: StateFlow<MdmEnrollmentDetails?> = _mdmEnrollmentDetails
 
     private var pollJob: Job? = null
 
@@ -146,7 +150,10 @@ class DeliveryViewModel(
         stopPolling()
         val previous = State.ProofRecorded(deliveryId)
         run(previous) {
-            api.requestMdmEnrollment(deliveryId).fold(previous) { _state.value = State.EnrollmentRequested(deliveryId) }
+            api.requestMdmEnrollmentWithDetails(deliveryId).fold(previous) { details ->
+                _mdmEnrollmentDetails.value = details
+                _state.value = State.EnrollmentRequested(deliveryId)
+            }
         }
     }
 
@@ -237,6 +244,7 @@ class DeliveryViewModel(
     fun reset() {
         stopPolling()
         _mdmPollTimedOut.value = false
+        _mdmEnrollmentDetails.value = null
         _state.value = State.Idle
     }
 

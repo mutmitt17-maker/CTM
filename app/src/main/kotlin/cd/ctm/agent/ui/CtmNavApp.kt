@@ -53,6 +53,7 @@ import cd.ctm.agent.ui.screens.AgentPortfolioScreen
 import cd.ctm.agent.ui.screens.CustomerScreen
 import cd.ctm.agent.ui.screens.DeliveryScreen
 import cd.ctm.agent.ui.screens.HomeScreen
+import cd.ctm.agent.ui.screens.IntegrationsScreen
 import cd.ctm.agent.ui.screens.KycScreen
 import cd.ctm.agent.ui.screens.LoginScreen
 import cd.ctm.agent.ui.screens.PaymentScreen
@@ -246,6 +247,7 @@ fun CtmNavApp(container: AppContainer) {
                         composable<Route.NewCustomer> {
                             CustomerScreen(
                                 vm = customerVm,
+                                aiAssistant = container.aiAssistant,
                                 canMakeApplication = readyDash != null && readyDash.calculatorOk && readyDash.items.isNotEmpty(),
                                 onKyc = { customerId ->
                                     kycVm.reset()
@@ -307,6 +309,7 @@ fun CtmNavApp(container: AppContainer) {
                         composable<Route.Payment> { entry ->
                             val args = entry.toRoute<Route.Payment>()
                             PaymentScreen(
+                                container = container,
                                 vm = paymentVm,
                                 initialContractNumber = args.contractNumber,
                                 onQueued = { container.refreshQueueState() },
@@ -318,6 +321,13 @@ fun CtmNavApp(container: AppContainer) {
                             SyncQueueScreen(
                                 container = container,
                                 onNeedsLogin = goLogin,
+                                onBack = { navController.popBackStack() },
+                            )
+                        }
+
+                        composable<Route.Integrations> {
+                            IntegrationsScreen(
+                                container = container,
                                 onBack = { navController.popBackStack() },
                             )
                         }

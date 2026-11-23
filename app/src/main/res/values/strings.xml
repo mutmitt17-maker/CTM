@@ -69,6 +69,14 @@
     <string name="sync_notif_channel">Synchronisation CTM</string>
     <string name="sync_notif_title">Synchronisation en pause</string>
     <string name="sync_notif_needs_login">Session expirée : reconnectez-vous pour envoyer vos dossiers en attente.</string>
+    <string name="notif_app_approved_title">Dossier approuvé : %1$s</string>
+    <string name="notif_app_approved_body">Le téléphone peut maintenant être livré au client.</string>
+    <string name="notif_app_rejected_title">Dossier refusé : %1$s</string>
+    <string name="notif_app_rejected_body">Consultez le motif dans Mes clients &amp; dossiers.</string>
+    <string name="notif_app_review_title">Dossier en révision : %1$s</string>
+    <string name="notif_app_review_body">Vérification manuelle requise côté superviseur.</string>
+    <string name="notif_app_multi_title">%1$d dossiers mis à jour</string>
+    <string name="notif_app_multi_body">Ouvrez Mes clients &amp; dossiers pour voir les décisions serveur.</string>
     <string name="biometric_lock_title">Application Agent verrouillée</string>
     <string name="biometric_lock_subtitle">Confirmez votre identité pour accéder aux dossiers clients CTM.</string>
     <string name="biometric_unlock_button">Déverrouiller</string>
@@ -89,6 +97,21 @@
     <string name="customer_address">Adresse</string>
     <string name="customer_city">Ville (facultatif)</string>
     <string name="customer_submit">Enregistrer le client</string>
+    <string name="customer_voice_card_title">Saisie vocale terrain (IA)</string>
+    <string name="customer_voice_card_desc">Dictez ou collez une description libre du client pour pré-remplir les champs automatiquement.</string>
+    <string name="customer_voice_button">Dicter la fiche (IA)</string>
+    <string name="customer_ai_prefilled_notice">Champs pré-remplis par l\'IA : relisez attentivement chaque information avant d\'enregistrer.</string>
+
+    <!-- Dialogue dictée vocale IA -->
+    <string name="voice_dialog_title">Dictée fiche client (IA)</string>
+    <string name="voice_dialog_hint">Parlez au micro ou saisissez les informations d\'un trait (nom, téléphone +243…, pièce, adresse, ville).</string>
+    <string name="voice_dialog_speech_prompt">Dictez le nom, le téléphone et l\'adresse du client…</string>
+    <string name="voice_dialog_start_mic">Parler au micro</string>
+    <string name="voice_dialog_unavailable">Reconnaissance vocale Google indisponible sur cet appareil : tapez ou utilisez le micro du clavier ci-dessous.</string>
+    <string name="voice_dialog_transcript_label">Texte dicté ou saisi</string>
+    <string name="voice_dialog_placeholder">Ex. Jean Mukendi, 0812345678, carte 12345, avenue Kasavubu Gombe Kinshasa</string>
+    <string name="voice_dialog_extract_button">Remplir avec l\'IA</string>
+    <string name="voice_dialog_extracting">Extraction…</string>
 
     <!-- KYC & biométrie -->
     <string name="kyc_title">Dossier d\'identité (KYC)</string>
@@ -130,6 +153,13 @@
     <string name="kyc_submit">Enregistrer le dossier KYC</string>
     <string name="kyc_queued_msg">Dossier KYC enregistré hors ligne (kyc.submit, contact d\'urgence et 3 consentements). Ordre de synchronisation : client -> photos bucket kyc -> actions KYC.</string>
     <string name="kyc_sync_now">Synchroniser maintenant</string>
+    <string name="kyc_ai_analyzing">Contrôle qualité &amp; lecture IA en cours…</string>
+    <string name="kyc_ai_quality_ok">Qualité %1$d/100</string>
+    <string name="kyc_ai_quality_warn">À vérifier (%1$d/100)</string>
+    <string name="kyc_ai_offline_note">Analyse IA indisponible (%1$s). La photo reste prête pour l\'envoi.</string>
+    <string name="kyc_ai_apply_fields">Appliquer les champs lus (IA)</string>
+    <string name="kyc_ai_fields_applied">Champs pré-remplis par l\'IA. Vérifiez l\'exactitude avant d\'enregistrer.</string>
+    <string name="kyc_ai_recheck_button">Re-vérifier avec l\'IA</string>
 
     <!-- Simulateur & dossier -->
     <string name="simulator_title">Simulateur de crédit</string>
@@ -156,6 +186,9 @@
     <string name="payment_amount_label">Montant reçu (USD)</string>
     <string name="payment_note_label">Note (facultatif)</string>
     <string name="payment_submit">Enregistrer le paiement</string>
+    <string name="payment_check_balance">Vérifier solde &amp; Mobile Money</string>
+    <string name="payment_outstanding_label">Solde restant serveur</string>
+    <string name="payment_mobile_money_notice">En cas de paiement client via M-Pesa, Airtel Money ou Orange Money avec la référence %1$s, ce solde s\'actualise et le téléphone se déverrouille automatiquement.</string>
 
     <!-- Livraison -->
     <string name="delivery_title">Livraison téléphone</string>
@@ -169,9 +202,9 @@
     <string name="delivery_deliver_this">Livrer ce dossier</string>
     <string name="delivery_step2_title">Étape 2 · Vérifier l\'IMEI du téléphone</string>
     <string name="delivery_imei_label">IMEI scanné ou saisi (15 chiffres)</string>
-    <string name="delivery_scan_imei">Scanner l\'IMEI (caméra)</string>
-    <string name="delivery_scanner_title">Scanner le code-barres IMEI</string>
-    <string name="delivery_scanner_hint">Visez le code-barres IMEI à 15 chiffres sur la boîte ou sous la batterie.</string>
+    <string name="delivery_scan_imei">Scanner IMEI (code-barres ou OCR)</string>
+    <string name="delivery_scanner_title">Scanner l\'IMEI (Code-barres + OCR)</string>
+    <string name="delivery_scanner_hint">Visez le code-barres de la boîte OU l\'IMEI affiché à l\'écran (*#06#).</string>
     <string name="delivery_verify_imei">Vérifier l\'IMEI</string>
     <string name="delivery_step3_title">Étape 3 · Preuve de remise</string>
     <string name="delivery_take_photo">Prendre une photo</string>
@@ -209,6 +242,23 @@
     <string name="portfolio_action_new_app">Nouveau dossier</string>
     <string name="portfolio_action_deliver">Livrer</string>
     <string name="portfolio_action_collect">Encaisser</string>
+    <string name="portfolio_ai_title">Priorités de tournée (IA)</string>
+    <string name="portfolio_ai_counts">%1$d à livrer · %2$d retard · %3$d local</string>
+    <string name="portfolio_ai_button">Générer les priorités du jour (IA)</string>
+    <string name="portfolio_ai_refresh_button">Actualiser les priorités (IA)</string>
+    <string name="portfolio_ai_loading">Analyse du portefeuille…</string>
+
+    <!-- Intégrations & Diagnostics -->
+    <string name="integrations_title">Intégrations &amp; État</string>
+    <string name="integrations_subtitle">Connectivité serveur, IA Gemini et production</string>
+    <string name="integrations_supabase_title">Backend Supabase</string>
+    <string name="integrations_test_supabase">Tester la connexion serveur</string>
+    <string name="integrations_ai_title">Firebase AI Logic (Gemini)</string>
+    <string name="integrations_ai_desc">Alimente le contrôle qualité KYC, l\'extraction vocale et les priorités de tournée via App Check.</string>
+    <string name="integrations_test_ai">Tester l\'IA Gemini en direct</string>
+    <string name="integrations_device_title">Capacités locales sur l\'appareil</string>
+    <string name="integrations_server_title">Services serveur &amp; Production</string>
+    <string name="integrations_server_desc">Connecteurs configurés sur Supabase Edge Functions &amp; Auth (à basculer en mode live lors de la mise en production).</string>
 
     <!-- File de synchronisation -->
     <string name="sync_title">Synchronisation</string>

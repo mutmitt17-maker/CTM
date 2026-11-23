@@ -42,6 +42,13 @@ interface AgentApi {
     /** action `request_mdm_enrollment` : le serveur prépare l'enrôlement MDM (verrouillage à distance) du téléphone. */
     suspend fun requestMdmEnrollment(deliveryId: String): ApiResult<Unit>
 
+    /** Variante retournant d'éventuelles informations d'enrôlement (code, QR, fournisseur) si le backend les fournit. */
+    suspend fun requestMdmEnrollmentWithDetails(deliveryId: String): ApiResult<MdmEnrollmentDetails?> =
+        when (val res = requestMdmEnrollment(deliveryId)) {
+            is ApiResult.Ok -> ApiResult.Ok(null)
+            is ApiResult.Failure -> res
+        }
+
     /**
      * Lecture de `delivery.mdm_status` (REST : l'agent voit ses livraisons). Le statut passe à `enrolled`
      * quand le serveur a confirmé l'enrôlement ; `complete_delivery` est refusé tant que ce n'est pas fait.
@@ -70,6 +77,14 @@ sealed class ApiResult<out T> {
     data class Ok<out T>(val value: T) : ApiResult<T>()
     data class Failure(val message: String) : ApiResult<Nothing>()
 }
+
+/** Détails facultatifs retournés par `request_mdm_enrollment` en mode MDM live. */
+data class MdmEnrollmentDetails(
+    val provider: String? = null,
+    val enrollmentCode: String? = null,
+    val qrPayload: String? = null,
+    val instructions: String? = null,
+)
 
 /** Réponse de `verify_delivery_imei` : `matched` et, si faux, la raison renvoyée par le serveur. */
 data class ImeiCheck(val matched: Boolean, val reason: String? = null)

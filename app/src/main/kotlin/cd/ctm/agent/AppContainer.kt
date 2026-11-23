@@ -1,10 +1,12 @@
 package cd.ctm.agent
 
 import android.content.Context
+import cd.ctm.agent.ai.CtmAiAssistant
 import cd.ctm.agent.data.AndroidDatabaseKey
 import cd.ctm.agent.data.AndroidDeviceFingerprint
 import cd.ctm.agent.data.AndroidPhotoVault
 import cd.ctm.agent.data.AndroidTokenStore
+import cd.ctm.agent.data.ApplicationStatusTracker
 import cd.ctm.agent.data.CatalogueCache
 import cd.ctm.agent.data.DeliveryStateStore
 import cd.ctm.agent.data.SqliteSyncStore
@@ -20,6 +22,7 @@ import com.ctm.credit.agent.delivery.DeliveryViewModel
 import com.ctm.credit.agent.kyc.KycViewModel
 import com.ctm.credit.agent.login.LoginViewModel
 import com.ctm.credit.agent.payment.PaymentViewModel
+import com.ctm.credit.http.AgentApplicationSummary
 import com.ctm.credit.http.HttpAgentApi
 import com.ctm.credit.http.HttpConfig
 import com.ctm.credit.http.HttpSyncApi
@@ -64,6 +67,8 @@ class AppContainer(context: Context) {
     val syncEngine = SyncEngine(syncStore, HttpSyncApi(http), canSend = ::canSendSyncItem)
     val cache = CatalogueCache(appContext)
     val deliveryStateStore = DeliveryStateStore(appContext)
+    val statusTracker = ApplicationStatusTracker(appContext)
+    val aiAssistant = CtmAiAssistant()
     private val syncMutex = Mutex()
 
     data class SyncCycleReport(
@@ -109,6 +114,9 @@ class AppContainer(context: Context) {
 
     private val _syncRunning = MutableStateFlow(false)
     val syncRunning: StateFlow<Boolean> = _syncRunning
+
+    private val _lastSyncAtMs = MutableStateFlow(0L)
+    val lastSyncAtMs: StateFlow<Long> = _lastSyncAtMs
 
     @Volatile private var _loginVm: LoginViewModel? = null
     @Volatile private var _customerVm: CustomerViewModel? = null
@@ -317,6 +325,7 @@ class AppContainer(context: Context) {
         }
 
         updateQueueSnapshot()
+        _lastSyncAtMs.value = System.currentTimeMillis()
         SyncCycleReport(
             outcome = finalOutcome,
             applied = totalApplied,
@@ -325,6 +334,18 @@ class AppContainer(context: Context) {
             uploadedPhotos = uploadedPhotos,
             photoError = photoError,
         )
+    }
+
+    /**
+     * Vérifie les changements de statut des dossiers de l'agent (décisions `worker-biometrics` / révision superviseur).
+     */
+    suspend fun checkApplicationStatusTransitions(): List<AgentApplicationSummary> {
+        val agentId = tokenStore.currentAgentId().orEmpty()
+        if (agentId.isBlank() || !tokens.isLoggedIn()) return emptyList()
+        return when (val res = agentHttpApi.fetchAgentApplications(limit = 30)) {
+            is ApiResult.Ok -> statusTracker.detectTransitions(agentId, res.value)
+            is ApiResult.Failure -> emptyList()
+        }
     }
 
     /**

@@ -246,4 +246,27 @@ class HttpAgentApiTest {
         assertEquals("CT-2026-000999", contracts[0].contractNumber)
         assertEquals(0, java.math.BigDecimal("90.25").compareTo(contracts[0].outstandingBalance))
     }
+
+    @Test fun `verification solde contrat par numero lit le solde et le statut`() = withEnv { env ->
+        env.ok(
+            """[{"id":"ct-1","contract_number":"CT-2026-000123","status":"defaulted","outstanding_balance":45.00,"created_at":"2026-11-10T10:00:00Z","customer":{"first_name":"Jean","last_name":"Mwamba"}}]""",
+        )
+        val res = blocking { env.agent.lookupContractByNumber(" ct-2026-000123 ") } as ApiResult.Ok
+        val ct = res.value!!
+        assertEquals("CT-2026-000123", ct.contractNumber)
+        assertEquals("defaulted", ct.status)
+        assertEquals("Jean Mwamba", ct.customerName)
+        assertEquals(0, java.math.BigDecimal("45.00").compareTo(ct.outstandingBalance))
+    }
+
+    @Test fun `requestMdmEnrollmentWithDetails lit les infos MDM live si presentes`() = withEnv { env ->
+        env.ok(
+            """{"ok":true,"data":{"provider":"knox_guard","enrollment_code":"KNOX-9988","qr_payload":"mdm://enroll/9988","instructions":"Scanner le QR dans les paramètres"}}""",
+        )
+        val res = blocking { env.agent.requestMdmEnrollmentWithDetails("del-1") } as ApiResult.Ok
+        val details = res.value!!
+        assertEquals("knox_guard", details.provider)
+        assertEquals("KNOX-9988", details.enrollmentCode)
+        assertEquals("mdm://enroll/9988", details.qrPayload)
+    }
 }

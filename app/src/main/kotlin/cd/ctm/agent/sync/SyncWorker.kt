@@ -40,6 +40,12 @@ class SyncWorker(
             return Result.success()
         }
         val report = container.runSyncCycle()
+        if (report.outcome != SyncOutcome.NEEDS_LOGIN && report.outcome != SyncOutcome.RETRY_LATER) {
+            val transitions = container.checkApplicationStatusTransitions()
+            if (transitions.isNotEmpty()) {
+                notifyStatusChanges(transitions)
+            }
+        }
         return when (report.outcome) {
             SyncOutcome.RETRY_LATER -> Result.retry()
             SyncOutcome.NEEDS_LOGIN -> {
@@ -54,14 +60,61 @@ class SyncWorker(
         }
     }
 
-    private fun notifyNeedsLogin() {
+    private fun canNotify(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val granted = ContextCompat.checkSelfPermission(
+            return ContextCompat.checkSelfPermission(
                 applicationContext,
                 Manifest.permission.POST_NOTIFICATIONS,
             ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) return
         }
+        return true
+    }
+
+    private fun notifyStatusChanges(apps: List<com.ctm.credit.http.AgentApplicationSummary>) {
+        if (!canNotify()) return
+        ensureChannel()
+        val intent = Intent(applicationContext, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            applicationContext,
+            1,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val first = apps.first()
+        val client = first.customerName ?: "Client CTM"
+        val title = if (apps.size == 1) {
+            when (first.status) {
+                "approved" -> applicationContext.getString(R.string.notif_app_approved_title, client)
+                "rejected" -> applicationContext.getString(R.string.notif_app_rejected_title, client)
+                else -> applicationContext.getString(R.string.notif_app_review_title, client)
+            }
+        } else {
+            applicationContext.getString(R.string.notif_app_multi_title, apps.size)
+        }
+        val body = if (apps.size == 1) {
+            when (first.status) {
+                "approved" -> applicationContext.getString(R.string.notif_app_approved_body)
+                "rejected" -> applicationContext.getString(R.string.notif_app_rejected_body)
+                else -> applicationContext.getString(R.string.notif_app_review_body)
+            }
+        } else {
+            applicationContext.getString(R.string.notif_app_multi_body)
+        }
+        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+        NotificationManagerCompat.from(applicationContext).notify(APP_STATUS_NOTIF_ID, notification)
+    }
+
+    private fun notifyNeedsLogin() {
+        if (!canNotify()) return
         ensureChannel()
         val intent = Intent(applicationContext, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -100,6 +153,7 @@ class SyncWorker(
         private const val IMMEDIATE_WORK_NAME = "ctm_immediate_sync"
         private const val CHANNEL_ID = "ctm_sync_alerts"
         private const val NOTIF_ID = 1042
+        private const val APP_STATUS_NOTIF_ID = 1043
 
         private val networkConstraint = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)

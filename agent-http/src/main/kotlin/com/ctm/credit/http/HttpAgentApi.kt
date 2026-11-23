@@ -4,6 +4,7 @@ import com.ctm.credit.agent.AgentApi
 import com.ctm.credit.agent.AgentSession
 import com.ctm.credit.agent.ApiResult
 import com.ctm.credit.agent.ImeiCheck
+import com.ctm.credit.agent.MdmEnrollmentDetails
 import com.ctm.credit.agent.MdmStatus
 import com.ctm.credit.network.ApiErrorKind
 import com.ctm.credit.network.ApiException
@@ -181,6 +182,35 @@ class HttpAgentApi(private val http: SupabaseHttp) : AgentApi {
         }
     }
 
+    suspend fun lookupContractByNumber(contractNumber: String): ApiResult<AgentContractSummary?> = attempt {
+        val normalized = contractNumber.trim().uppercase()
+        if (normalized.isBlank()) return@attempt null
+        val row = http.rest(
+            "contract?contract_number=eq.$normalized" +
+                "&select=id,contract_number,status,outstanding_balance,created_at,customer(first_name,last_name)&limit=1",
+        ).firstOrNull().asJsonObjectOrNull() ?: return@attempt null
+        val cust = row.get("customer").asJsonObjectOrNull()
+        val custName = cust?.let {
+            "${it.stringOrNull("first_name").orEmpty()} ${it.stringOrNull("last_name").orEmpty()}".trim()
+        }?.ifBlank { null }
+        val balEl = row.get("outstanding_balance")
+        val balance = if (balEl == null || balEl.isJsonNull) BigDecimal.ZERO else balEl.asBigDecimal
+        AgentContractSummary(
+            id = row.stringOrNull("id").orEmpty(),
+            contractNumber = row.stringOrNull("contract_number").orEmpty(),
+            status = row.stringOrNull("status").orEmpty(),
+            outstandingBalance = balance,
+            createdAt = row.stringOrNull("created_at"),
+            customerName = custName,
+        )
+    }
+
+    suspend fun pingServerLatencyMs(): ApiResult<Long> = attempt {
+        val start = System.currentTimeMillis()
+        http.call("me")
+        (System.currentTimeMillis() - start).coerceAtLeast(1L)
+    }
+
     // ------------------------------------------------------------------ livraison (appels directs, en ligne)
     suspend fun fetchApprovedApplicationsForDelivery(): ApiResult<List<ApprovedDeliveryApplication>> = attempt {
         val arr = http.rest(
@@ -239,6 +269,28 @@ class HttpAgentApi(private val http: SupabaseHttp) : AgentApi {
     override suspend fun requestMdmEnrollment(deliveryId: String): ApiResult<Unit> = attempt(alreadyDone = ALREADY_ENROLLED) {
         http.call("request_mdm_enrollment", params("p_delivery" to deliveryId))
         Unit
+    }
+
+    override suspend fun requestMdmEnrollmentWithDetails(deliveryId: String): ApiResult<MdmEnrollmentDetails?> = try {
+        val data = io {
+            http.call("request_mdm_enrollment", params("p_delivery" to deliveryId))
+        }.asJsonObjectOrNull()
+        val details = data?.let { o ->
+            val provider = o.stringOrNull("provider")
+            val code = o.stringOrNull("enrollment_code")
+            val qr = o.stringOrNull("qr_payload")
+            val instructions = o.stringOrNull("instructions")
+            if (provider == null && code == null && qr == null && instructions == null) null
+            else MdmEnrollmentDetails(provider, code, qr, instructions)
+        }
+        ApiResult.Ok(details)
+    } catch (e: ApiException) {
+        if (ALREADY_ENROLLED.containsMatchIn(e.message.orEmpty())) ApiResult.Ok(null)
+        else ApiResult.Failure(ErrorMessages.forException(e))
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        ApiResult.Failure("Réponse inattendue du serveur.")
     }
 
     override suspend fun mdmStatus(deliveryId: String): ApiResult<MdmStatus> = attempt {

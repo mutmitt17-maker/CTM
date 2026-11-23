@@ -27,6 +27,7 @@ import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Badge
 import androidx.compose.material.icons.outlined.Calculate
 import androidx.compose.material.icons.outlined.FolderShared
+import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.LocalShipping
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.Sync
@@ -136,6 +137,12 @@ fun HomeScreen(
         title = stringResource(R.string.home_title),
         subtitle = stringResource(R.string.home_subtitle),
         actions = {
+            IconButton(
+                onClick = { onNavigate(Route.Integrations) },
+                modifier = Modifier.testTag("integrations_button"),
+            ) {
+                Icon(Icons.Outlined.Hub, contentDescription = stringResource(R.string.integrations_title))
+            }
             IconButton(
                 onClick = { container.loadDashboard() },
                 modifier = Modifier.testTag("refresh_dashboard_button"),

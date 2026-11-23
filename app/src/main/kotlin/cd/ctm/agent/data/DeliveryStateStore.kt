@@ -1,8 +1,6 @@
 package cd.ctm.agent.data
 
 import android.content.Context
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.ctm.credit.agent.delivery.DeliveryViewModel
 
 /**
@@ -10,13 +8,7 @@ import com.ctm.credit.agent.delivery.DeliveryViewModel
  * ou une mise en arrière-plan pendant l'attente de l'enrôlement MDM.
  */
 class DeliveryStateStore(context: Context) {
-    private val prefs = EncryptedSharedPreferences.create(
-        context,
-        "ctm_delivery_state_enc",
-        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+    private val prefs = openEncryptedPrefs(context, "ctm_delivery_state_enc")
 
     fun save(state: DeliveryViewModel.State) {
         when (state) {

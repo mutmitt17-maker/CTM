@@ -2,19 +2,11 @@ package cd.ctm.agent.data
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.ctm.credit.security.TokenStore
 
 /** Jetons de connexion et identité de l'agent actif, chiffrés avec Android Keystore. */
 class AndroidTokenStore(context: Context) : TokenStore {
-    private val prefs: SharedPreferences = EncryptedSharedPreferences.create(
-        context,
-        "ctm_secure_prefs",
-        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+    private val prefs: SharedPreferences = openEncryptedPrefs(context, "ctm_secure_prefs")
 
     override fun accessToken(): String? = prefs.getString(ACCESS, null)
 

@@ -13,4 +13,5 @@ sealed interface Route {
     @Serializable data object Delivery : Route
     @Serializable data class Payment(val contractNumber: String? = null) : Route
     @Serializable data object SyncQueue : Route
+    @Serializable data object Integrations : Route
 }

@@ -23,10 +23,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -58,6 +60,9 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import cd.ctm.agent.AppContainer
 import cd.ctm.agent.R
+import cd.ctm.agent.ai.AiOutcome
+import cd.ctm.agent.ai.KycIdAnalysisResult
+import cd.ctm.agent.ai.KycSelfieAnalysisResult
 import cd.ctm.agent.data.ImageCompressor
 import cd.ctm.agent.ui.components.AlertKind
 import cd.ctm.agent.ui.components.BadgeTone
@@ -123,6 +128,15 @@ fun KycScreen(
     var photoStatusMessage by remember { mutableStateOf<String?>(null) }
     var processingPhoto by remember { mutableStateOf(false) }
 
+    var analyzingIdAi by remember { mutableStateOf(false) }
+    var idAiResult by remember { mutableStateOf<KycIdAnalysisResult?>(null) }
+    var idAiError by remember { mutableStateOf<String?>(null) }
+    var idAiApplied by remember { mutableStateOf(false) }
+
+    var analyzingSelfieAi by remember { mutableStateOf(false) }
+    var selfieAiResult by remember { mutableStateOf<KycSelfieAnalysisResult?>(null) }
+    var selfieAiError by remember { mutableStateOf<String?>(null) }
+
     var customerOptions by remember { mutableStateOf<List<CustomerOption>>(emptyList()) }
     var loadingCustomers by remember { mutableStateOf(false) }
 
@@ -154,6 +168,65 @@ fun KycScreen(
         }
     }
 
+    fun runIdPhotoAi(relPath: String) {
+        if (relPath.isBlank()) return
+        analyzingIdAi = true
+        idAiResult = null
+        idAiError = null
+        idAiApplied = false
+        uiScope.launch {
+            val bmp = withContext(Dispatchers.IO) {
+                val file = container.photoVault.fileFor("kyc/$relPath") ?: return@withContext null
+                val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
+                BitmapFactory.decodeFile(file.absolutePath, opts)
+            }
+            if (bmp == null) {
+                analyzingIdAi = false
+                idAiError = context.getString(R.string.kyc_photo_compress_error)
+                return@launch
+            }
+            val res = try {
+                container.aiAssistant.analyzeKycIdPhoto(bmp, idDocumentTypeWire)
+            } finally {
+                bmp.recycle()
+            }
+            analyzingIdAi = false
+            when (res) {
+                is AiOutcome.Success -> idAiResult = res.data
+                is AiOutcome.Error -> idAiError = res.message
+            }
+        }
+    }
+
+    fun runSelfieAi(relPath: String) {
+        if (relPath.isBlank()) return
+        analyzingSelfieAi = true
+        selfieAiResult = null
+        selfieAiError = null
+        uiScope.launch {
+            val bmp = withContext(Dispatchers.IO) {
+                val file = container.photoVault.fileFor("kyc/$relPath") ?: return@withContext null
+                val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
+                BitmapFactory.decodeFile(file.absolutePath, opts)
+            }
+            if (bmp == null) {
+                analyzingSelfieAi = false
+                selfieAiError = context.getString(R.string.kyc_photo_compress_error)
+                return@launch
+            }
+            val res = try {
+                container.aiAssistant.analyzeKycSelfieQuality(bmp)
+            } finally {
+                bmp.recycle()
+            }
+            analyzingSelfieAi = false
+            when (res) {
+                is AiOutcome.Success -> selfieAiResult = res.data
+                is AiOutcome.Error -> selfieAiError = res.message
+            }
+        }
+    }
+
     fun handleCapturedUri(uri: Uri) {
         val target = pendingCameraTarget
         val cid = customerId.trim()
@@ -176,7 +249,13 @@ fun KycScreen(
             }
             processingPhoto = false
             if (ok) {
-                if (target == "id") idPhotoPath = newRelPath else selfiePath = newRelPath
+                if (target == "id") {
+                    idPhotoPath = newRelPath
+                    runIdPhotoAi(newRelPath)
+                } else {
+                    selfiePath = newRelPath
+                    runSelfieAi(newRelPath)
+                }
                 container.refreshQueueState()
             } else {
                 photoStatusMessage = context.getString(R.string.kyc_photo_compress_error)
@@ -373,20 +452,64 @@ fun KycScreen(
                         relPath = idPhotoPath,
                         photoVault = container.photoVault,
                         busy = processingPhoto,
+                        analyzingAi = analyzingIdAi,
+                        qualityBadge = idAiResult?.let {
+                            val label = if (it.qualityOk) {
+                                stringResource(R.string.kyc_ai_quality_ok, it.qualityScore)
+                            } else {
+                                stringResource(R.string.kyc_ai_quality_warn, it.qualityScore)
+                            }
+                            label to (if (it.qualityOk) BadgeTone.OK else BadgeTone.WARN)
+                        },
+                        aiFeedback = idAiResult?.qualityFeedback,
+                        aiError = idAiError,
+                        aiActionLabel = if (idAiResult != null && !idAiApplied &&
+                            (idAiResult!!.birthDate.isNotBlank() || idAiResult!!.commune.isNotBlank() ||
+                                idAiResult!!.neighborhood.isNotBlank() || idAiResult!!.detectedDocType != "unknown")
+                        ) {
+                            stringResource(R.string.kyc_ai_apply_fields)
+                        } else null,
+                        aiAppliedNotice = if (idAiApplied) stringResource(R.string.kyc_ai_fields_applied) else null,
                         takeTag = "kyc_take_id_photo_button",
                         galleryTag = "kyc_pick_id_photo_button",
+                        analyzeTag = "kyc_analyze_id_ai_button",
+                        applyTag = "kyc_apply_ai_id_button",
                         onTakePhoto = { startCameraCapture("id") },
                         onPickGallery = { startGalleryPick("id") },
+                        onAnalyzeAi = { runIdPhotoAi(idPhotoPath) },
+                        onApplyAiFields = {
+                            val r = idAiResult ?: return@KycPhotoCaptureBlock
+                            if (Regex("""\d{4}-\d{2}-\d{2}""").matches(r.birthDate)) birthDate = r.birthDate
+                            if (r.commune.isNotBlank()) commune = r.commune
+                            if (r.neighborhood.isNotBlank()) neighborhood = r.neighborhood
+                            if (r.detectedDocType in listOf("national_id", "voter_card", "passport", "driver_license")) {
+                                idDocumentTypeWire = r.detectedDocType
+                            }
+                            idAiApplied = true
+                        },
                     )
                     KycPhotoCaptureBlock(
                         title = stringResource(R.string.kyc_selfie_photo_title),
                         relPath = selfiePath,
                         photoVault = container.photoVault,
                         busy = processingPhoto,
+                        analyzingAi = analyzingSelfieAi,
+                        qualityBadge = selfieAiResult?.let {
+                            val label = if (it.qualityOk) {
+                                stringResource(R.string.kyc_ai_quality_ok, it.qualityScore)
+                            } else {
+                                stringResource(R.string.kyc_ai_quality_warn, it.qualityScore)
+                            }
+                            label to (if (it.qualityOk) BadgeTone.OK else BadgeTone.WARN)
+                        },
+                        aiFeedback = selfieAiResult?.qualityFeedback,
+                        aiError = selfieAiError,
                         takeTag = "kyc_take_selfie_button",
                         galleryTag = "kyc_pick_selfie_button",
+                        analyzeTag = "kyc_analyze_selfie_ai_button",
                         onTakePhoto = { startCameraCapture("selfie") },
                         onPickGallery = { startGalleryPick("selfie") },
+                        onAnalyzeAi = { runSelfieAi(selfiePath) },
                     )
                 }
 
@@ -490,10 +613,20 @@ private fun KycPhotoCaptureBlock(
     relPath: String,
     photoVault: cd.ctm.agent.data.AndroidPhotoVault,
     busy: Boolean,
+    analyzingAi: Boolean = false,
+    qualityBadge: Pair<String, BadgeTone>? = null,
+    aiFeedback: String? = null,
+    aiError: String? = null,
+    aiActionLabel: String? = null,
+    aiAppliedNotice: String? = null,
     takeTag: String,
     galleryTag: String,
+    analyzeTag: String,
+    applyTag: String? = null,
     onTakePhoto: () -> Unit,
     onPickGallery: () -> Unit,
+    onAnalyzeAi: () -> Unit,
+    onApplyAiFields: () -> Unit = {},
 ) {
     val file = remember(relPath) {
         if (relPath.isBlank()) null else photoVault.fileFor("kyc/$relPath")
@@ -523,8 +656,15 @@ private fun KycPhotoCaptureBlock(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                if (file != null) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                if (qualityBadge != null) {
+                    CtmBadge(qualityBadge.first, qualityBadge.second)
+                } else if (file != null) {
                     CtmBadge(stringResource(R.string.kyc_photo_ready), BadgeTone.OK)
                 } else {
                     CtmBadge(stringResource(R.string.kyc_photo_missing), BadgeTone.WARN)
@@ -542,6 +682,40 @@ private fun KycPhotoCaptureBlock(
                         .clip(RoundedCornerShape(10.dp))
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp)),
                 )
+            }
+
+            if (analyzingAi) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text(
+                        text = stringResource(R.string.kyc_ai_analyzing),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else if (!aiFeedback.isNullOrBlank()) {
+                val kind = if (qualityBadge?.second == BadgeTone.OK) AlertKind.OK else AlertKind.WARN
+                CtmAlertBanner(kind, aiFeedback)
+            } else if (!aiError.isNullOrBlank()) {
+                CtmAlertBanner(AlertKind.INFO, stringResource(R.string.kyc_ai_offline_note, aiError))
+            }
+
+            if (aiActionLabel != null) {
+                Button(
+                    onClick = onApplyAiFields,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(if (applyTag != null) Modifier.testTag(applyTag) else Modifier),
+                ) {
+                    Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(aiActionLabel)
+                }
+            } else if (!aiAppliedNotice.isNullOrBlank()) {
+                CtmAlertBanner(AlertKind.OK, aiAppliedNotice)
             }
 
             Row(
@@ -565,6 +739,18 @@ private fun KycPhotoCaptureBlock(
                     Icon(Icons.Outlined.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(R.string.kyc_pick_gallery), maxLines = 1)
+                }
+            }
+
+            if (file != null && !analyzingAi) {
+                OutlinedButton(
+                    onClick = onAnalyzeAi,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth().testTag(analyzeTag),
+                ) {
+                    Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.kyc_ai_recheck_button), maxLines = 1)
                 }
             }
         }

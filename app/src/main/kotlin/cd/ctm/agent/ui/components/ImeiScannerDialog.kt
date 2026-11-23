@@ -32,9 +32,12 @@ import com.ctm.credit.model.Imei
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 
 /**
- * Scanner caméra temps réel (CameraX + ML Kit) détectant un code-barres ou QR contenant un IMEI valide à 15 chiffres.
+ * Scanner caméra temps réel (CameraX + ML Kit) détectant un IMEI valide à 15 chiffres
+ * par code-barres/QR OU en secours par lecture OCR (écran `*#06#` ou étiquette).
  */
 @Composable
 fun ImeiScannerDialog(
@@ -44,35 +47,62 @@ fun ImeiScannerDialog(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var detected by remember { mutableStateOf(false) }
+    var lastOcrCandidate by remember { mutableStateOf<String?>(null) }
+    var ocrMatchCount by remember { mutableStateOf(0) }
+    var statusHint by remember { mutableStateOf<String?>(null) }
 
-    val scanner = remember {
+    val barcodeScanner = remember {
         val options = BarcodeScannerOptions.Builder()
             .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS)
             .build()
         BarcodeScanning.getClient(options)
     }
 
+    val textRecognizer = remember {
+        TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    }
+
     val controller = remember(context) {
         val executor = ContextCompat.getMainExecutor(context)
         LifecycleCameraController(context).apply {
+            @Suppress("DEPRECATION")
             setImageAnalysisAnalyzer(
                 executor,
                 MlKitAnalyzer(
-                    listOf(scanner),
+                    listOf(barcodeScanner, textRecognizer),
                     CameraController.COORDINATE_SYSTEM_VIEW_REFERENCED,
                     executor,
                 ) { result ->
                     if (detected) return@MlKitAnalyzer
-                    val barcodes = result?.getValue(scanner).orEmpty()
+
+                    // 1. Priorité au code-barres / QR (détection immédiate).
+                    val barcodes = result?.getValue(barcodeScanner).orEmpty()
                     for (b in barcodes) {
                         val raw = b.rawValue ?: continue
-                        val candidate = Regex("\\d{15}").findAll(raw)
-                            .map { it.value }
-                            .firstOrNull { Imei.isValid(it) }
+                        val candidate = extractValidImei(raw)
                         if (candidate != null) {
                             detected = true
                             onDetected(candidate)
-                            break
+                            return@MlKitAnalyzer
+                        }
+                    }
+
+                    // 2. Secours OCR hors ligne (ex. écran *#06# ou texte imprimé sans code-barres).
+                    val ocrText = result?.getValue(textRecognizer)?.text
+                    if (!ocrText.isNullOrBlank()) {
+                        val ocrCandidate = extractValidImei(ocrText)
+                        if (ocrCandidate != null) {
+                            if (ocrCandidate == lastOcrCandidate) {
+                                ocrMatchCount++
+                            } else {
+                                lastOcrCandidate = ocrCandidate
+                                ocrMatchCount = 1
+                            }
+                            statusHint = "OCR : $ocrCandidate"
+                            if (ocrMatchCount >= 2) {
+                                detected = true
+                                onDetected(ocrCandidate)
+                            }
                         }
                     }
                 },
@@ -84,7 +114,8 @@ fun ImeiScannerDialog(
         controller.bindToLifecycle(lifecycleOwner)
         onDispose {
             controller.unbind()
-            scanner.close()
+            barcodeScanner.close()
+            textRecognizer.close()
         }
     }
 
@@ -110,6 +141,9 @@ fun ImeiScannerDialog(
                         .height(260.dp)
                         .clip(RoundedCornerShape(12.dp)),
                 )
+                if (statusHint != null) {
+                    CtmBadge(statusHint!!, BadgeTone.INFO)
+                }
             }
         },
         confirmButton = {},
@@ -119,4 +153,19 @@ fun ImeiScannerDialog(
             }
         },
     )
+}
+
+private fun extractValidImei(raw: String): String? {
+    val lines = raw.lineSequence()
+    for (line in lines) {
+        val compact = line.replace(Regex("[\\s-]"), "")
+        val match = Regex("\\d{15}").findAll(compact)
+            .map { it.value }
+            .firstOrNull { Imei.isValid(it) }
+        if (match != null) return match
+    }
+    val fullCompact = raw.replace(Regex("[\\s-]"), "")
+    return Regex("\\d{15}").findAll(fullCompact)
+        .map { it.value }
+        .firstOrNull { Imei.isValid(it) }
 }

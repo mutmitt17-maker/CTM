@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "396296133500",
+    "project_id": "gen-lang-client-0827629417",
+    "storage_bucket": "gen-lang-client-0827629417.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:396296133500:android:06c4b040d6ad894a9122f9",
+        "android_client_info": {
+          "package_name": "com.aistudio.ctmcredit.kmpzqx"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDpm88OKrhFC3tsGrY8gpuQ2CY9taeqBz8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

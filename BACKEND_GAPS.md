@@ -32,12 +32,17 @@ Ce document recense les dépendances serveur vérifiées et les points qui deman
   - L'app sonde automatiquement la table `delivery` (`GET /rest/v1/delivery?id=eq.<id>&select=mdm_enrolled_at,status`) toutes les 4 s jusqu'à confirmation ou expiration (~88 s) avec possibilité de relancer.
   - En environnement réel, configurer `MDM_MODE=live` et l'adaptateur fournisseur dans `_shared/mdm.ts` ainsi que les variables de déploiement QR/Zero-Touch si requises.
 
-## Étapes 3 & 4 — Sécurité locale, synchronisation et suivi agent (implémenté côté Android)
-- **Lectures portefeuille agent (`AgentPortfolioScreen`)** :
-  - L'app lit `/rest/v1/customer`, `/rest/v1/application` (jointure `customer`, `device_model`, `credit_decision`) et `/rest/v1/contract` (jointure `customer`) sous le JWT de l'agent.
-  - **À vérifier côté RLS** : s'assurer que les politiques `SELECT` permettent à l'agent authentifié de lire les dossiers et contrats de son agence.
-- **Notifications push serveur (optionnel pour V2)** :
-  - L'app gère la notification locale en cas d'expiration de session lors de la synchronisation en arrière-plan (`WorkManager`), mais ne reçoit pas encore de push FCM lors des retours asynchrones `worker-biometrics` / révision superviseur.
+## Étapes 3 & 4 — Sécurité locale, IA terrain et intégrations (implémenté côté Android)
+- **Assistance IA terrain (Firebase AI Logic `gemini-3.8-flash` + App Check)** :
+  - `KycScreen` : pré-contrôle qualité photo pièce/selfie et extraction OCR de pré-remplissage (non bloquant hors ligne ; ne remplace jamais `worker-biometrics`).
+  - `CustomerScreen` : dictée vocale / texte libre structuré (`RecognizerIntent` + schéma JSON strict).
+  - `AgentPortfolioScreen` : synthèse & priorisation quotidienne de tournée avec actions directes.
+  - **En production** : activer la clé **reCAPTCHA Enterprise** (`recaptcha_site_key` déjà généré) et l'application App Check dans la console Firebase si activée en mode strict.
+- **Scanner IMEI hybride (1.B)** : CameraX + ML Kit Code-barres + ML Kit Text Recognition hors ligne (`*#06#` ou étiquette) avec validation Luhn.
+- **Suivi Mobile Money & Contrats (Point 3)** :
+  - `PaymentScreen` interroge `/rest/v1/contract` pour afficher le solde restant en direct après un paiement M-Pesa / Airtel Money / Orange Money (`process_mobile_money_payment` webhook serveur).
+  - `SyncWorker` surveille les changements de statut de `loan_application` (`approved`, `pending_review`, `rejected`) et notifie l'agent localement sans configuration FCM obligatoire (FCM push serveur reste optionnel en V2).
+- **Écran « Intégrations & État »** : ping latence Supabase, test live Gemini App Check, et checklist de bascule `BIOMETRICS_MODE=live`, `MDM_MODE=live`, webhooks Mobile Money RDC, SMTP Auth personnalisé.
 - **App Client séparée** :
   - À créer dans un projet/applet distinct avec `client-auth` OTP.
 

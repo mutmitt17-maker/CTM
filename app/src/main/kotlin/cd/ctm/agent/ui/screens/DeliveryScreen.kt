@@ -110,6 +110,7 @@ fun DeliveryScreen(
     val state by vm.state.collectAsState()
     val mdmPolling by vm.mdmPolling.collectAsState()
     val mdmTimedOut by vm.mdmPollTimedOut.collectAsState()
+    val mdmDetails by vm.mdmEnrollmentDetails.collectAsState()
 
     var approvedApps by remember { mutableStateOf<List<ApprovedDeliveryApplication>>(emptyList()) }
     var loadingApps by remember { mutableStateOf(true) }
@@ -566,6 +567,12 @@ fun DeliveryScreen(
                 CtmCard {
                     Text(stringResource(R.string.delivery_step5_title), style = MaterialTheme.typography.titleMedium)
                     CtmAlertBanner(AlertKind.INFO, stringResource(R.string.delivery_step5_desc))
+                    mdmDetails?.let { details ->
+                        details.provider?.let { CtmKeyValueRow("Fournisseur MDM", it) }
+                        details.enrollmentCode?.let { CtmKeyValueRow("Code enrôlement", it, mono = true) }
+                        details.qrPayload?.let { CtmKeyValueRow("Payload QR", it, mono = true) }
+                        details.instructions?.let { CtmAlertBanner(AlertKind.INFO, it) }
+                    }
                     if (mdmPolling) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,

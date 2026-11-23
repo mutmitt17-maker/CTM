@@ -1,8 +1,6 @@
 package cd.ctm.agent.data
 
 import android.content.Context
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.ctm.credit.agent.AgentSession
 import com.ctm.credit.agent.CatalogItem
 import com.ctm.credit.agent.CreditPolicy
@@ -20,13 +18,7 @@ class CatalogueCache(context: Context) {
     )
 
     private val legacyPrefs = context.getSharedPreferences("ctm_catalogue_cache", Context.MODE_PRIVATE)
-    private val prefs = EncryptedSharedPreferences.create(
-        context,
-        "ctm_catalogue_cache_enc",
-        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+    private val prefs = openEncryptedPrefs(context, "ctm_catalogue_cache_enc")
     private val gson = Gson()
 
     init {

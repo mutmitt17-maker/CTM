@@ -1,8 +1,10 @@
 package cd.ctm.agent.ui
 
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.WindowManager
+import cd.ctm.agent.BuildConfig
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
@@ -42,6 +44,7 @@ import androidx.fragment.app.FragmentActivity
 import cd.ctm.agent.AppContainer
 import cd.ctm.agent.CtmApplication
 import cd.ctm.agent.R
+import cd.ctm.agent.ai.configureAppCheck
 import cd.ctm.agent.data.AndroidBiometricGate
 import cd.ctm.agent.ui.components.AlertKind
 import cd.ctm.agent.ui.components.CtmAlertBanner
@@ -59,11 +62,15 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Empêche les captures d'écran et l'exposition de données clients/KYC dans le sélecteur d'apps.
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE,
-        )
+        configureAppCheck(this, intent)
+        // Empêche les captures d'écran sur appareils physiques en production sans masquer
+        // l'affichage sur l'émulateur de prévisualisation ni en mode debug.
+        if (!BuildConfig.DEBUG && !isEmulator()) {
+            window.setFlags(
+                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE,
+            )
+        }
         enableEdgeToEdge()
 
         container = (application as CtmApplication).container
@@ -120,6 +127,20 @@ class MainActivity : FragmentActivity() {
         outState.putBoolean(KEY_BIOMETRIC_LOCKED, biometricLocked)
         outState.putLong(KEY_LAST_STOPPED_AT, lastStoppedAtMs)
     }
+
+    private fun isEmulator(): Boolean =
+        Build.FINGERPRINT.startsWith("generic") ||
+            Build.FINGERPRINT.startsWith("unknown") ||
+            Build.MODEL.contains("google_sdk") ||
+            Build.MODEL.contains("Emulator") ||
+            Build.MODEL.contains("Android SDK built for") ||
+            Build.MANUFACTURER.contains("Genymotion") ||
+            (Build.BRAND.startsWith("generic") && Build.DEVICE.startsWith("generic")) ||
+            Build.PRODUCT == "google_sdk" ||
+            Build.PRODUCT.contains("sdk_gphone") ||
+            Build.PRODUCT.contains("emulator") ||
+            Build.HARDWARE.contains("goldfish") ||
+            Build.HARDWARE.contains("ranchu")
 
     private companion object {
         const val LOCK_AFTER_BACKGROUND_MS = 30_000L
