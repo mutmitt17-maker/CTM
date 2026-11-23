@@ -26,12 +26,18 @@ import java.util.concurrent.TimeUnit
  *
  * Si le serveur répond 401, le jeton est renouvelé une fois avec le jeton de rafraîchissement, puis l'appel est rejoué.
  */
-class SupabaseHttp(
+class SupabaseHttp internal constructor(
     private val config: HttpConfig,
     private val tokens: TokenStore,
     private val device: DeviceFingerprint,
-    private val client: OkHttpClient = defaultClient(),
+    private val client: OkHttpClient,
 ) {
+    constructor(
+        config: HttpConfig,
+        tokens: TokenStore,
+        device: DeviceFingerprint,
+    ) : this(config, tokens, device, defaultClient())
+
     private val json = "application/json".toMediaType()
     private val refreshLock = Any()
 

@@ -2,6 +2,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     kotlin("jvm")
+    `java-library`
 }
 
 java {
@@ -20,7 +21,7 @@ dependencies {
     implementation(project(":core-network"))
     implementation(project(":core-security"))
     implementation(project(":app-agent"))
-    implementation(libs.okhttp)
+    api(libs.okhttp)
     implementation(libs.gson)
     implementation(libs.kotlinx.coroutines.core)
 
